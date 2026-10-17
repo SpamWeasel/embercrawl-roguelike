@@ -1,0 +1,9 @@
+{
+  // Game rules only: no browser, Node or Electron APIs are visible here, so the engine stays pure.
+  "extends": "./tsconfig.base.json",
+  "compilerOptions": {
+    "lib": ["es2023"],
+    "types": []
+  },
+  "include": ["src/engine"]
+}

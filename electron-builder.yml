@@ -1,0 +1,29 @@
+# Windows installers for x64 and ARM64 PCs. Run with `pnpm dist`.
+appId: com.embercrawl.game
+productName: Embercrawl
+copyright: Copyright © 2026 Embercrawl
+directories:
+  buildResources: build
+  output: release/${version}
+files:
+  - out/**/*
+asar: true
+win:
+  icon: build/icon.ico
+  target:
+    - target: nsis
+      arch:
+        - x64
+        - arm64
+nsis:
+  oneClick: false
+  perMachine: false
+  allowToChangeInstallationDirectory: true
+  createDesktopShortcut: always
+  createStartMenuShortcut: true
+  shortcutName: Embercrawl
+  # One installer per PC type (about 100 MB each) instead of an extra combined one twice the size.
+  buildUniversalInstaller: false
+  # Save files live in the user's AppData folder and must survive uninstalling or reinstalling.
+  deleteAppDataOnUninstall: false
+  artifactName: ${productName}-Setup-${version}-${arch}.${ext}

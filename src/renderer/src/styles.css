@@ -1,0 +1,34 @@
+@import "tailwindcss";
+
+@theme {
+  --color-abyss: #07070b;
+  --color-ash: #1a1820;
+  --color-bone: #efe6d8;
+  --color-ember: #ff8a3d;
+  --color-cinder: #b4380f;
+  --font-display: "Georgia", "Cambria", "Times New Roman", serif;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+}
+
+body {
+  margin: 0;
+  background: radial-gradient(ellipse at 50% 90%, #24110b 0%, var(--color-abyss) 62%);
+  color: var(--color-bone);
+  font-family: "Segoe UI", system-ui, sans-serif;
+}
+
+.title-ember {
+  background: linear-gradient(180deg, #ffe7bd 0%, var(--color-ember) 55%, var(--color-cinder) 100%);
+  background-clip: text;
+  color: transparent;
+  filter: drop-shadow(0 0 22px rgb(255 120 40 / 0.35));
+}
+
+.vignette {
+  background: radial-gradient(ellipse at center, transparent 45%, rgb(0 0 0 / 0.65) 100%);
+}
