@@ -5,8 +5,12 @@ import { saveService } from "./saves/saveService";
 import { GameScreen } from "./screens/GameScreen";
 import { TitleScreen } from "./screens/TitleScreen";
 
-/** `#scene=game` opens the most recent character on launch; the smoke test uses it. */
-let openGameOnLaunch = new URLSearchParams(window.location.hash.slice(1)).get("scene") === "game";
+/**
+ * `#scene=game` opens the most recent character on launch, and `#scene=pack` also opens its pack;
+ * the smoke test uses them.
+ */
+const launchScene = new URLSearchParams(window.location.hash.slice(1)).get("scene");
+let openGameOnLaunch = launchScene === "game" || launchScene === "pack";
 
 function reportReady(details: ReadyDetails): void {
   window.embercrawl?.signalReady(details);
@@ -14,6 +18,7 @@ function reportReady(details: ReadyDetails): void {
 
 export function App() {
   const [playing, setPlaying] = useState<CharacterSave | null>(null);
+  const [startWithPack, setStartWithPack] = useState(false);
 
   if (playing) {
     return (
@@ -21,6 +26,7 @@ export function App() {
         key={playing.id}
         initial={playing}
         saves={saveService}
+        startWithPack={startWithPack}
         onExit={() => setPlaying(null)}
         onReady={reportReady}
       />
@@ -33,6 +39,7 @@ export function App() {
       saves={saveService}
       autoContinue={autoContinue}
       onPlay={(save) => {
+        setStartWithPack(autoContinue && launchScene === "pack");
         openGameOnLaunch = false;
         setPlaying(save);
       }}

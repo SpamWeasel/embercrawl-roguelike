@@ -3,20 +3,23 @@
 //
 // Usage: pnpm exec tsx scripts/demo-saves.mts <output folder> [--showcase] <floor> [floor...]
 //   SEED=123 pnpm exec tsx scripts/demo-saves.mts .demo 1 4 30
-// Floors passed on the way down are cleared of creatures. With --showcase, a few creatures on the
-// final floor are moved next to the hero (one about to strike, one wounded) to show combat visuals.
+// Floors passed on the way down are cleared of creatures and traps. With --showcase, a few creatures on the
+// final floor are moved next to the hero (one about to strike, one wounded) to show combat visuals,
+// and items, a cache and a found trap are laid out nearby, with a stocked pack.
 // Then launch with EMBERCRAWL_USER_DATA=<output folder>\floor-<n> (see CLAUDE.md).
 import { randomUUID } from "node:crypto";
 import { join, resolve } from "node:path";
 import { chebyshevDistance } from "../src/engine/geometry";
+import { ARMORS, CACHE, type ItemId, type Pack, WEAPONS } from "../src/engine/items";
 import { FLOOR_COUNT, indexOf, MAP_HEIGHT, MAP_WIDTH, Tile, tileAt } from "../src/engine/map";
+import { emptyPack } from "../src/engine/pack";
 import { findPath } from "../src/engine/path";
 import { applyAction, currentFloor, type RunState, visibleTiles } from "../src/engine/run";
 import { newCharacter, updateCharacter } from "../src/engine/save";
 import { SaveStore } from "../src/main/save-store";
 
 const args = process.argv.slice(2);
-const showcase = args.includes("--showcase");
+const showcaseWanted = args.includes("--showcase");
 const [outDir, ...floorArgs] = args.filter((a) => a !== "--showcase");
 const floors = floorArgs.map(Number);
 if (
@@ -31,10 +34,11 @@ if (
 }
 const seed = Number(process.env.SEED ?? 20261017);
 
+/** Clears creatures and traps from the current floor, so the walk to its stairs is safe. */
 function clearCurrentFloor(run: RunState): RunState {
   return {
     ...run,
-    floors: run.floors.map((f) => (f.depth === run.depth ? { ...f, monsters: [] } : f)),
+    floors: run.floors.map((f) => (f.depth === run.depth ? { ...f, monsters: [], traps: [] } : f)),
   };
 }
 
@@ -53,8 +57,11 @@ function descendTo(start: RunState, depth: number): RunState {
   return run;
 }
 
-/** Moves up to four creatures into view around the hero: one ready to strike, one wounded. */
-function gatherCreatures(run: RunState): RunState {
+/**
+ * Moves up to four creatures into view around the hero (one ready to strike, one wounded), lays out
+ * items, a cache and a found trap nearby, and stocks the pack.
+ */
+function showcase(run: RunState): RunState {
   const floor = currentFloor(run);
   const visible = visibleTiles(run);
   const spots: Array<{ x: number; y: number }> = [];
@@ -65,7 +72,8 @@ function gatherCreatures(run: RunState): RunState {
       if (distance < 1 || distance > 3 || !visible.has(indexOf(p))) continue;
       if (tileAt(floor.tiles, p) !== Tile.Floor) continue;
       if (floor.camp && floor.camp.x === x && floor.camp.y === y) continue;
-      spots.push(p);
+      const taken = [...floor.items, ...floor.traps].some((t) => t.x === x && t.y === y);
+      if (!taken) spots.push(p);
     }
   }
   spots.sort((a, b) => chebyshevDistance(a, run.hero) - chebyshevDistance(b, run.hero));
@@ -83,10 +91,42 @@ function gatherCreatures(run: RunState): RunState {
       hp: i === 1 ? Math.max(1, Math.round(monster.maxHp * 0.4)) : monster.hp,
     };
   });
+  // Items and a found trap on the open spots the creatures didn't take.
+  const open = spots.filter((_, i) => i % 3 !== 0);
+  const [gearSpot, supplySpot, cacheSpot, trapSpot] = [open[0], open[2], open[4], open[6]];
+  const gear = [...WEAPONS, ...ARMORS]
+    .filter((g) => !("starter" in g) && g.tier <= run.depth + 1)
+    .sort((a, b) => b.tier - a.tier)[0];
+  const items = [
+    ...floor.items,
+    ...(gearSpot && gear ? [{ id: `${run.depth}-s1`, item: gear.id, ...gearSpot }] : []),
+    ...(supplySpot ? [{ id: `${run.depth}-s2`, item: "ember-shard" as const, ...supplySpot }] : []),
+    ...(cacheSpot ? [{ id: `${run.depth}-s3`, item: CACHE, ...cacheSpot }] : []),
+  ];
+  const traps = trapSpot
+    ? [
+        ...floor.traps,
+        { id: `${run.depth}-st`, kind: "ember-vent" as const, ...trapSpot, power: 6, found: true },
+      ]
+    : floor.traps;
   return {
     ...run,
-    floors: run.floors.map((f) => (f.depth === run.depth ? { ...f, monsters } : f)),
+    pack: packWith(
+      ["salve", 3],
+      ["ward-sigil", 1],
+      ["flare-flask", 2],
+      ["survey-lens", 1],
+      ["waystone", 1],
+    ),
+    floors: run.floors.map((f) => (f.depth === run.depth ? { ...f, monsters, items, traps } : f)),
   };
+}
+
+function packWith(...entries: Array<[ItemId, number]>): Pack {
+  return emptyPack().map((_, slot) => {
+    const entry = entries[slot];
+    return entry ? { item: entry[0], count: entry[1] } : null;
+  });
 }
 
 for (const depth of floors) {
@@ -96,7 +136,7 @@ for (const depth of floors) {
   let run = descendTo(fresh.run, depth);
   // One turn in, so the game skips the new-descent story card.
   if (run.turn === 0) run = applyAction(run, { type: "wait" }).run;
-  if (showcase) run = gatherCreatures(run);
+  if (showcaseWanted) run = showcase(run);
   const save = updateCharacter(fresh, run, { now, playTimeMs: 0 });
   const folder = resolve(outDir, `floor-${depth}`);
   await new SaveStore(join(folder, "Saves")).write(save);

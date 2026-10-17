@@ -1,13 +1,12 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { Point } from "../../../engine/geometry";
-import { indexOf } from "../../../engine/map";
-import { findPath } from "../../../engine/path";
 import {
   type Action,
   type ActionResult,
   applyAction,
   currentFloor,
   type GameEvent,
+  walkRoute,
 } from "../../../engine/run";
 import { beginDescent, type CharacterSave, updateCharacter } from "../../../engine/save";
 import type { SaveBridge } from "../../../shared/bridge";
@@ -42,6 +41,8 @@ const DANGER: ReadonlySet<GameEvent["type"]> = new Set([
   "monster-struck",
   "spotted",
   "attacked",
+  "trap-found",
+  "trap-sprung",
   "died",
 ]);
 
@@ -111,16 +112,8 @@ export function useCharacterSession(initial: CharacterSave, saves: SaveBridge): 
       cancelWalk();
       const run = current.current.run;
       if (!run) return;
-      const floor = currentFloor(run);
-      // Walk around creatures rather than into them; clicking one walks up and attacks it.
-      const occupied = new Set(floor.monsters.map((m) => indexOf(m)));
-      const goal = indexOf(target);
-      const route = findPath(
-        floor.tiles,
-        run.hero,
-        target,
-        (i) => floor.explored[i] === true && (!occupied.has(i) || i === goal),
-      );
+      // Walks around creatures and known traps; clicking one walks up to it (attacking a creature).
+      const route = walkRoute(currentFloor(run), run.hero, target);
       if (!route || route.length === 0) return;
       let next = 0;
       const advance = (): boolean => {

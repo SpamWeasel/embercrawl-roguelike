@@ -1,8 +1,23 @@
 import { z } from "zod";
 import { CREATURE_IDS, type CreatureId } from "./creatures";
+import { generateFloor } from "./generate";
+import {
+  ARMOR_IDS,
+  type ArmorId,
+  CACHE,
+  ITEM_IDS,
+  type ItemId,
+  STARTING_ARMOR,
+  STARTING_WEAPON,
+  TRAP_IDS,
+  type TrapKind,
+  WEAPON_IDS,
+  type WeaponId,
+} from "./items";
 import { FLOOR_COUNT, isWalkable, MAP_HEIGHT, MAP_SIZE, MAP_WIDTH, tileAt } from "./map";
+import { emptyPack } from "./pack";
 import { Rng } from "./rng";
-import { HERO_START_HP, LANTERN_MAX } from "./rules";
+import { HERO_START_HP, LANTERN_MAX, PACK_SLOTS, STACK_LIMIT } from "./rules";
 import { newRun, type RunState } from "./run";
 
 /**
@@ -14,9 +29,10 @@ import { newRun, type RunState } from "./run";
  * Version history:
  * 1. Exploration only (milestone 1).
  * 2. Creatures, combat, the lantern, camps and the bestiary (milestone 3).
+ * 3. Items, the pack, weapons and armor, and traps (milestone 4).
  */
 export const SAVE_FORMAT = "embercrawl-character";
-export const SAVE_VERSION = 2;
+export const SAVE_VERSION = 3;
 export const CHARACTER_NAME_MAX = 24;
 
 export interface CharacterRecord {
@@ -195,7 +211,53 @@ const UPGRADES: Readonly<
       record: { ...record, deaths: 0, discovered: [] },
     };
   },
+  /**
+   * 2 → 3: adds items and traps. The hero gets the starting knife and coat and an empty pack.
+   * Floors already visited get the items and traps they would have been made with (nothing has
+   * been picked up from them yet), except on the tile where the hero stands.
+   */
+  2: (save) => ({
+    ...save,
+    run: isRecord(save.run) ? upgradeRunFrom2(save.run) : null,
+  }),
 };
+
+function upgradeRunFrom2(run: Record<string, unknown>): Record<string, unknown> {
+  const seed = Number.isInteger(run.seed) ? (run.seed as number) : 0;
+  const hero = isRecord(run.hero) ? run.hero : {};
+  const floors = Array.isArray(run.floors) ? run.floors : [];
+  return {
+    ...run,
+    equipment: { weapon: STARTING_WEAPON, armor: STARTING_ARMOR },
+    pack: emptyPack(),
+    floors: floors.map((floor) => {
+      if (!isRecord(floor)) return floor;
+      const contents = originalContents(seed, floor);
+      const standing = (p: { x: number; y: number }) =>
+        floor.depth === run.depth && p.x === hero.x && p.y === hero.y;
+      return {
+        ...floor,
+        items: contents.items.filter((item) => !standing(item)),
+        traps: contents.traps.filter((trap) => !standing(trap)),
+      };
+    }),
+  };
+}
+
+/** A saved floor's items and traps, regenerated from its seed; none if the layout doesn't match. */
+function originalContents(seed: number, floor: Record<string, unknown>) {
+  const none = { items: [], traps: [] };
+  const depth = floor.depth;
+  if (typeof depth !== "number" || !Number.isInteger(depth) || depth < 1 || depth > FLOOR_COUNT)
+    return none;
+  const original = generateFloor(seed, depth);
+  const tiles = floor.tiles;
+  const sameLayout =
+    Array.isArray(tiles) &&
+    tiles.length === original.tiles.length &&
+    tiles.every((tile, index) => tile === original.tiles[index]);
+  return sameLayout ? { items: original.items, traps: original.traps } : none;
+}
 
 function upgradeRunFrom1(run: Record<string, unknown>): Record<string, unknown> {
   const seed = Number.isInteger(run.seed) ? (run.seed as number) : 0;
@@ -254,8 +316,29 @@ const PointSchema = z.object({
 const FacingSchema = z.enum(["left", "right"]);
 
 const CreatureIdSchema = z.enum(CREATURE_IDS as unknown as [CreatureId, ...CreatureId[]]);
+const ItemIdSchema = z.enum(ITEM_IDS as [ItemId, ...ItemId[]]);
+const WeaponIdSchema = z.enum(WEAPON_IDS as [WeaponId, ...WeaponId[]]);
+const ArmorIdSchema = z.enum(ARMOR_IDS as [ArmorId, ...ArmorId[]]);
+const TrapKindSchema = z.enum(TRAP_IDS as [TrapKind, ...TrapKind[]]);
 
 const TileSchema = z.union([z.literal(0), z.literal(1), z.literal(2), z.literal(3)]);
+
+const FloorItemSchema = PointSchema.extend({
+  id: z.string().min(1).max(16),
+  item: z.union([ItemIdSchema, z.literal(CACHE)]),
+});
+
+const TrapSchema = PointSchema.extend({
+  id: z.string().min(1).max(16),
+  kind: TrapKindSchema,
+  power: z.number().int().min(0),
+  found: z.boolean(),
+});
+
+const PackEntrySchema = z.object({
+  item: ItemIdSchema,
+  count: z.number().int().min(1).max(STACK_LIMIT),
+});
 
 const MonsterSchema = PointSchema.extend({
   id: z.string().min(1).max(16),
@@ -279,6 +362,8 @@ const FloorSchema = z.object({
   camp: PointSchema.nullable(),
   campUsed: z.boolean(),
   monsters: z.array(MonsterSchema).max(40),
+  items: z.array(FloorItemSchema).max(MAP_SIZE),
+  traps: z.array(TrapSchema).max(40),
 });
 
 const HeroSchema = PointSchema.extend({
@@ -304,11 +389,13 @@ const RunSchema = z
     floors: z.array(FloorSchema).min(1).max(FLOOR_COUNT),
     hero: HeroSchema,
     lantern: z.object({ charge: Count.max(LANTERN_MAX), bright: z.boolean() }),
+    equipment: z.object({ weapon: WeaponIdSchema, armor: ArmorIdSchema }),
+    pack: z.array(PackEntrySchema.nullable()).length(PACK_SLOTS),
     rng: z.tuple([Uint32, Uint32, Uint32, Uint32]),
     kills: Count,
     discovered: z.array(CreatureIdSchema),
     status: z.enum(["active", "dead"]),
-    killedBy: CreatureIdSchema.nullable(),
+    killedBy: z.union([CreatureIdSchema, TrapKindSchema]).nullable(),
   })
   .refine((run) => new Set(run.floors.map((f) => f.depth)).size === run.floors.length, {
     message: "Each floor may appear only once.",

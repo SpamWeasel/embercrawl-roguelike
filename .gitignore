@@ -10,6 +10,7 @@ dist/
 # Test and tool output
 coverage/
 .smoke/
+.demo/
 
 # Logs
 *.log

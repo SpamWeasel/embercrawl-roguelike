@@ -23,7 +23,8 @@ export interface AppInfo {
   arch: string;
 }
 
-export type Scene = "title" | "game";
+/** Screens the smoke test can open: the title, the game, or the game with the pack open. */
+export type Scene = "title" | "game" | "pack";
 
 /** Sent once a screen has drawn its first frame. */
 export interface ReadyDetails {

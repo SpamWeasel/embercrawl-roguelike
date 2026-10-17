@@ -3,7 +3,6 @@ import { creatureKind } from "../../src/engine/creatures";
 import type { Direction } from "../../src/engine/geometry";
 import {
   CAMP_CHARGE,
-  heroAttackPower,
   PULSE_BONUS_DAMAGE,
   PULSE_COST,
   PULSE_SHIELD,
@@ -13,6 +12,7 @@ import {
   type Action,
   type ActionResult,
   applyAction,
+  attackPower,
   availableInteraction,
   currentFloor,
   type GameEvent,
@@ -60,7 +60,7 @@ describe("attacking", () => {
     expect(result.run.hero).toMatchObject({ x: 2, y: 2 });
     const [hit] = events(result, "attacked");
     if (hit?.type !== "attacked") throw new Error("Expected an attack.");
-    const power = heroAttackPower(1);
+    const power = attackPower(result.run);
     expect(hit.damage).toBeGreaterThanOrEqual(power);
     expect(hit.damage).toBeLessThanOrEqual(power + 2);
     expect(monsters(result.run)[0]?.hp).toBe(creatureKind("iron-husk").hp - hit.damage);
@@ -299,7 +299,7 @@ describe("the lantern", () => {
     expect(result.run.hero.shield).toBe(PULSE_SHIELD);
     expect(events(result, "pulsed")).toEqual([{ type: "pulsed", at: { x: 3, y: 2 }, hits: 1 }]);
     const after = new Map(monsters(result.run).map((m) => [m.id, m.hp]));
-    expect(after.get(near.id)).toBe(near.hp - (heroAttackPower(1) + PULSE_BONUS_DAMAGE));
+    expect(after.get(near.id)).toBe(near.hp - (attackPower(result.run) + PULSE_BONUS_DAMAGE));
     expect(after.get(behindWall.id)).toBe(99);
     expect(after.get(tooFar.id)).toBe(tooFar.hp);
   });

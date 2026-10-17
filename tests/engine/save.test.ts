@@ -1,6 +1,8 @@
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
+import { generateFloor } from "../../src/engine/generate";
+import { STARTING_ARMOR, STARTING_WEAPON } from "../../src/engine/items";
 import { applyAction } from "../../src/engine/run";
 import {
   beginDescent,
@@ -134,7 +136,7 @@ describe("older save files", () => {
   it("upgrade from version 1, keeping where the character was", () => {
     expect(v1.version).toBe(1);
     const save = parseCharacterSave(v1);
-    expect(save.version).toBe(2);
+    expect(save.version).toBe(SAVE_VERSION);
     expect(save.name).toBe("Version One");
     expect(save.run?.depth).toBe(2);
     expect(save.run?.turn).toBe(24);
@@ -169,7 +171,62 @@ describe("older save files", () => {
       parseCharacterSave(
         throughJson(updateCharacter(save, played.run, { now: NOW, playTimeMs: 1 })),
       ).version,
-    ).toBe(2);
+    ).toBe(SAVE_VERSION);
+  });
+
+  // A real version-2 save, written by the milestone-3 engine before items existed: a wounded hero
+  // on floor 2 with bright light on, three kills, and floor 1's camp already used.
+  const v2 = JSON.parse(
+    readFileSync(fileURLToPath(new URL("../fixtures/character-v2.json", import.meta.url)), "utf8"),
+  );
+
+  it("upgrade from version 2, keeping the hero, the lantern and every creature", () => {
+    expect(v2.version).toBe(2);
+    const save = parseCharacterSave(v2);
+    expect(save.version).toBe(SAVE_VERSION);
+    expect(save.name).toBe("Version Two");
+    expect(save.run?.hero).toEqual(v2.run.hero);
+    expect(save.run?.lantern).toEqual(v2.run.lantern);
+    expect(save.run).toMatchObject({
+      turn: v2.run.turn,
+      depth: v2.run.depth,
+      kills: v2.run.kills,
+      discovered: v2.run.discovered,
+      rng: v2.run.rng,
+    });
+    expect(save.run?.floors.map((f) => f.monsters)).toEqual(
+      v2.run.floors.map((f: { monsters: unknown }) => f.monsters),
+    );
+    expect(save.run?.floors[0]?.campUsed).toBe(true);
+    expect(save.record).toEqual(v2.record);
+  });
+
+  it("give version-2 characters the starting gear, an empty pack, and the floors' own items", () => {
+    const save = parseCharacterSave(v2);
+    const run = save.run;
+    if (!run) throw new Error("Expected a run.");
+    expect(run.equipment).toEqual({ weapon: STARTING_WEAPON, armor: STARTING_ARMOR });
+    expect(run.pack.every((slot) => slot === null)).toBe(true);
+    for (const floor of run.floors) {
+      const original = generateFloor(run.seed, floor.depth);
+      const standing = (p: { x: number; y: number }) =>
+        floor.depth === run.depth && p.x === run.hero.x && p.y === run.hero.y;
+      expect(floor.items).toEqual(original.items.filter((item) => !standing(item)));
+      expect(floor.traps).toEqual(original.traps.filter((t) => !standing(t)));
+    }
+    expect(run.floors.some((floor) => floor.items.length > 0)).toBe(true);
+  });
+
+  it("keep playing after the version-2 upgrade", () => {
+    const save = parseCharacterSave(v2);
+    const run = save.run;
+    if (!run) throw new Error("Expected a run.");
+    const played = applyAction(run, { type: "wait" });
+    expect(played.tookTurn).toBe(true);
+    const again = parseCharacterSave(
+      throughJson(updateCharacter(save, played.run, { now: NOW, playTimeMs: 1 })),
+    );
+    expect(again.run?.turn).toBe(run.turn + 1);
   });
 });
 

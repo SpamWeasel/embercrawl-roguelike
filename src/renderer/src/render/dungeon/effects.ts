@@ -47,19 +47,35 @@ export class EffectLayer {
 
   /** A number (or short word) that pops up from a point and drifts upward. */
   number(at: Point, label: string, color: number, big = false): void {
+    this.float(at, label, color, big ? 26 : 19, "800", big ? 1200 : 850);
+  }
+
+  /** A name (an item picked up, gear put on) that rises a little slower than a number. */
+  label(at: Point, label: string, color: number): void {
+    this.float(at, label, color, 15, "700", 1300);
+  }
+
+  private float(
+    at: Point,
+    label: string,
+    color: number,
+    fontSize: number,
+    fontWeight: "700" | "800",
+    life: number,
+  ): void {
     const text = new Text({
       text: label,
       style: {
         fontFamily: "Segoe UI, system-ui, sans-serif",
-        fontSize: big ? 26 : 19,
-        fontWeight: "800",
+        fontSize,
+        fontWeight,
         fill: color,
         stroke: { color: 0x0a0608, width: 4 },
       },
     });
     text.anchor.set(0.5, 1);
     this.screen.addChild(text);
-    this.floating.push({ text, at, ms: 0, life: big ? 1200 : 850 });
+    this.floating.push({ text, at, ms: 0, life });
   }
 
   ring(at: Point, radius: number, color: number, life = 360): void {

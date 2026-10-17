@@ -8,11 +8,15 @@ import {
 export interface GameKeyHandlers {
   move(direction: Direction): void;
   wait(): void;
-  /** Use whatever is underfoot: stairs or a camp. */
+  /** Use whatever is underfoot: stairs, a camp, or an item to pick up. */
   interact(): void;
   toggleLight(): void;
   pulse(): void;
   menu(): void;
+  /** Open the pack. */
+  inventory(): void;
+  /** Use (or equip) what's in a pack slot, numbered from 0. */
+  itemSlot(slot: number): void;
 }
 
 /**
@@ -45,6 +49,20 @@ const DIRECT_KEYS: Readonly<Record<string, Direction>> = {
 };
 const WAIT_KEYS = new Set(["Space", "Numpad5", "Period"]);
 const INTERACT_KEYS = new Set(["Enter", "NumpadEnter"]);
+const INVENTORY_KEYS = new Set(["KeyI", "Tab"]);
+/** The number row uses pack slots 1–9, then 0 for the tenth. (The number pad moves.) */
+const SLOT_KEYS = [
+  "Digit1",
+  "Digit2",
+  "Digit3",
+  "Digit4",
+  "Digit5",
+  "Digit6",
+  "Digit7",
+  "Digit8",
+  "Digit9",
+  "Digit0",
+];
 
 /** Two direction keys pressed within this window count as one diagonal. */
 const CHORD_MS = 45;
@@ -149,6 +167,12 @@ export function useGameKeys(handlers: GameKeyHandlers, enabled: boolean): void {
       } else if (code === "Escape") {
         event.preventDefault();
         if (!event.repeat) latest.current.menu();
+      } else if (INVENTORY_KEYS.has(code)) {
+        event.preventDefault();
+        if (!event.repeat) latest.current.inventory();
+      } else if (SLOT_KEYS.includes(code)) {
+        event.preventDefault();
+        if (!event.repeat) latest.current.itemSlot(SLOT_KEYS.indexOf(code));
       }
     };
 

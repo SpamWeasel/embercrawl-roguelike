@@ -57,6 +57,43 @@ art matches; descriptions are new.
   and can begin a new descent.
 - Every combat number is in `src/engine/rules.ts`, which milestone 5's balance bot will tune.
 
+**Built in milestone 4** (Emberdepths' item rules as the starting point, in new words and code):
+- **Supplies:** Salve (+16 health), Deep Salve (+40, from floor 10), Ember Shard (+40 charge),
+  Ward Sigil (+12 shield), Vigor Draught (+6 max health), Waystone (to a quiet spot on the floor,
+  away from creatures), Survey Lens (reveals the floor and its traps) and Flare Flask (16 damage
+  to every creature in view within 3 tiles). Supplies that would be wasted (a salve at full
+  health, a flare with no targets) are refused without using a turn.
+- **Weapons and armor:** ten weapons (attack +3 to +22) and nine armors (defense 1 to 15), from
+  the Weathered Knife and Traveler's Coat every descent starts with. One piece per floor from
+  floor 2: even floors favor weapons, odd floors armor; recent tiers are most common, and
+  guardian floors reach further ahead. Gear must be equipped; the old piece goes to the pack.
+- **Each floor holds** random supplies (more on odd and deeper floors), a guaranteed healing
+  supply from floor 4, a supply cache on odd floors and every floor from 15 (it opens into one
+  supply, fixed per cache), and a salve beside the entrance on floor 1.
+- **The pack:** ten numbered slots, stacks of up to nine. Walking onto an item picks it up (Enter
+  picks it up later if the pack was full). Keys 1–0 use or equip a slot; I or Tab opens the pack
+  beside the dungeon to inspect, use or drop. Every use, equip or drop takes a turn.
+- **Traps** (none on floor 1, up to five deeper): Ember Vents burn (armor doesn't help; shields
+  do), Alarm Glyphs wake creatures within 8 tiles, Gloom Runes drain the lantern and put out
+  bright light. Traps stay hidden in dim light; **bright light shows those within 2 tiles**, which
+  makes the lantern trade-off matter while exploring. A Survey Lens shows them all. Found traps
+  are drawn, explained in tooltips and walked around by click-to-walk; creatures never set them
+  off. Traps can kill.
+- **Tooltips and comparisons:** hovering a creature shows its health, behavior, how hard it hits
+  you after armor and how many of your blows it takes; hovering an item, found trap, camp or
+  stairs explains it. Gear shows "Attack 5 → 7 (+2)", green when better and red when worse;
+  supplies show what they'd do right now. Worn gear (with attack and defense) sits bottom left
+  and the pack's slots bottom right, each with tooltips.
+- **Visuals:** items bob and glint on the floor, take their tile's light, drop in when set down
+  and lift away when picked up; caches burst open; each supply and trap has its own effect (heal
+  sparkles, shield rings, the flare's fire ring, a Waystone shimmer, the Survey Lens revealing
+  the floor as a spreading ripple, vent fire, alarm rings, gloom).
+- Saves move to format 3, with an upgrade from format 2 tested against a genuine version-2 save.
+  Upgraded characters get the starting gear, and floors they already visited get the items and
+  traps they were made with.
+- The owner's nine item pictures are used; the rest have drawn pixel-art placeholders until art
+  arrives (drop `<item id>.png` into `assets/sprites/items/`).
+
 ## 2. Diagonal movement
 
 - Hero and monsters move in 8 directions. A diagonal step costs one turn, like any other.
@@ -153,7 +190,8 @@ Embercrawl.exe (Electron)
 
 - One screen: stats, minimap and log in side panels on wide screens; inventory and character
   sheets as overlays above the dungeon.
-- Mouse: click to move, hover tooltips for creatures and items, gear comparisons.
+- Mouse: click to move, hover tooltips for creatures and items, gear comparisons (built in
+  milestone 4).
 - Keyboard-first with remappable keys; Xbox and PlayStation controller support.
 - Windowed, fullscreen and borderless; any resolution and aspect ratio; UI scale setting.
 - Pause menu, settings, and an automatic save on quit.
@@ -207,7 +245,7 @@ Embercrawl.exe (Electron)
 | 1 ✅ | Walkable dungeon: floor generation, 8-way movement and corner rule, fog, stairs, keyboard and mouse, floor palettes every three floors, title screen with multiple characters (first one created automatically), autosave to disk | Walk floors, quit, and resume |
 | 2 ✅ | **Feel pass:** smooth motion, camera, lantern lighting, particles, input queuing, fullscreen and scaling | Judge the feel early |
 | 3 ✅ | Combat and creatures: behaviors adapted to 8-way, leveling, death, the lantern, camps, combat effects (sparks, damage numbers, dissolves, pulse shockwave) | Fight |
-| 4 | Items and inventory (healing, gear, traps), tooltips and comparisons | Gear up |
+| 4 ✅ | Items and inventory (healing, gear, traps), tooltips and comparisons | Gear up |
 | 5 | Full descent: 30 floors of content, guardians, shops, victory; bot re-tuned to 25–35% | Play a whole run |
 | 6 | Characters, saves and settings: character select, export/import, backups, file association, key remapping, gamepad | Manage characters and move saves between PCs |
 | 7 | Art and audio pass | |

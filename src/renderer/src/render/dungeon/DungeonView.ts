@@ -10,6 +10,7 @@ import {
   samePoint,
   step,
 } from "../../../../engine/geometry";
+import { itemKind, type SupplyId, type SupplyKind, trapKind } from "../../../../engine/items";
 import {
   inBounds,
   indexOf,
@@ -20,16 +21,17 @@ import {
   pointOf,
   tileAt,
 } from "../../../../engine/map";
-import { findPath } from "../../../../engine/path";
 import { PULSE_RADIUS } from "../../../../engine/rules";
-import type { GameEvent, Hero } from "../../../../engine/run";
+import { type GameEvent, type Hero, walkRoute } from "../../../../engine/run";
 import { STEP_MS } from "../../game/timing";
 import { CreatureRig } from "./CreatureRig";
 import { cameraOffset, crispScale, snapToPixel } from "./camera";
 import { type CreatureTextures, loadCreatureTextures } from "./creatureArt";
 import { EffectLayer } from "./effects";
 import { HeroRig } from "./HeroRig";
+import { LootLayer, type TileLook } from "./LootLayer";
 import { flicker, lanternLevel, REMEMBERED_TINT, scaleColor, tileTint } from "./lighting";
+import { type LootTextures, loadLootTextures } from "./lootArt";
 import { approach, clamp01, moveToward, StepQueue } from "./motion";
 import type { FloorPalette } from "./palettes";
 import { ParticleField } from "./particles";
@@ -47,7 +49,7 @@ const TARGET_COLUMNS = 20;
 const TARGET_ROWS = 12;
 /** Screen space kept clear for the HUD bars, so the map's edges never hide underneath them. */
 const HUD_TOP_SPACE = 64;
-const HUD_BOTTOM_SPACE = 104;
+const HUD_BOTTOM_SPACE = 128;
 
 const REDUCED_STEP_MS = 50;
 /** Fades, in milliseconds. */
@@ -76,6 +78,19 @@ const DAMAGE_TAKEN_COLOR = 0xff5a4a;
 const SHIELD_COLOR = 0x8fc8ff;
 const HEAL_COLOR = 0x8ff0a0;
 const LEVEL_COLOR = 0xffd45a;
+const PICKUP_COLOR = 0xffe2a8;
+const MUTED_COLOR = 0xb8b0a8;
+const CHARGE_COLOR = 0xffc060;
+const VIGOR_COLOR = 0xff7a8a;
+const WAYSTONE_COLOR = 0xbfd4ff;
+const SURVEY_COLOR = 0x9fe6ff;
+const FLARE_COLORS = [0xffe0a0, 0xffb347, 0xff6a2a] as const;
+const CRATE_COLORS = [0x8a5a30, 0xb07a44, 0x9aa0a8] as const;
+
+/** A Survey Lens reveals the floor as a ripple spreading this many tiles a second. */
+const SURVEY_WAVE_TILES_PER_S = 30;
+/** Items in view glint about this often, all together, per second. */
+const GLINT_RATE = 0.9;
 
 export interface DungeonModel {
   readonly floor: Floor;
@@ -88,6 +103,8 @@ export interface DungeonModel {
 
 export interface DungeonViewOptions {
   onTileClick(tile: Point): void;
+  /** The tile under the mouse changed (null when the mouse leaves the map). */
+  onHover?(tile: Point | null): void;
   /** Shorter, calmer animation for players who asked their system for reduced motion. */
   reducedMotion: boolean;
 }
@@ -120,6 +137,10 @@ export class DungeonView {
   private readonly stepMs: number;
   private readonly reducedMotion: boolean;
   private readonly campTextures = createCampTextures();
+  private readonly loot: LootLayer;
+  private readonly onHover: DungeonViewOptions["onHover"];
+  /** Where a Survey Lens was used, and when; its reveal ripples outward from there. */
+  private surveyWave: { origin: Point; ms: number } | null = null;
   private readonly rigs = new Map<string, CreatureRig>();
   private monstersById = new Map<string, Monster>();
   /** Small delays so a strike plays after the step that provoked it. */
@@ -158,11 +179,14 @@ export class DungeonView {
     private readonly app: Application,
     private readonly sprites: SpriteTextures,
     private readonly creatureTextures: CreatureTextures,
+    private readonly lootTextures: LootTextures,
     options: DungeonViewOptions,
   ) {
     this.reducedMotion = options.reducedMotion;
+    this.onHover = options.onHover;
     this.stepMs = options.reducedMotion ? REDUCED_STEP_MS : STEP_MS;
     this.steps = new StepQueue(this.display, this.stepMs);
+    this.loot = new LootLayer(lootTextures, options.reducedMotion);
 
     for (let index = 0; index < MAP_SIZE; index++) {
       // Textures (and so sizes) are assigned in buildFloor, once the palette is known.
@@ -190,10 +214,12 @@ export class DungeonView {
     this.world.addChild(
       this.stairs,
       this.camp,
+      this.loot.traps,
       this.ground.container,
       this.glowMask,
       this.glow,
       this.campGlow,
+      this.loot.items,
       this.actors,
       this.effects.world,
       this.air.container,
@@ -229,12 +255,13 @@ export class DungeonView {
       preference: "webgl",
     });
     try {
-      const [sprites, creatures] = await Promise.all([
+      const [sprites, creatures, loot] = await Promise.all([
         loadSpriteTextures(),
         loadCreatureTextures(),
+        loadLootTextures(),
       ]);
       host.appendChild(app.canvas);
-      return new DungeonView(app, sprites, creatures, options);
+      return new DungeonView(app, sprites, creatures, loot, options);
     } catch (error) {
       app.destroy(true);
       throw error;
@@ -272,6 +299,7 @@ export class DungeonView {
     }
     this.hero.face(model.hero.facing);
     this.syncCreatures(model.floor.monsters, false);
+    this.loot.sync(model.floor.items, model.floor.traps, false);
     this.drawCamp(model.floor);
     this.drawGlowMask(model.visible);
     this.drawOverlay();
@@ -384,12 +412,81 @@ export class DungeonView {
           this.transition = { phase: "out", ms: 0 };
           this.hero.startSink();
           break;
+        case "monster-hurt":
+          this.later(110, () => {
+            this.rigs.get(event.id)?.flash();
+            this.effects.number(
+              this.centerOf(event.at, 0.4),
+              String(event.damage),
+              DAMAGE_DEALT_COLOR,
+            );
+            this.sparks(event.at, 0xffc070, 8);
+          });
+          strikeAt = Math.max(strikeAt, 220);
+          break;
+        case "picked-up": {
+          // The item lifts away once the hero has stepped onto it.
+          const delay = heroStepped ? this.stepMs * 0.7 : 30;
+          this.loot.pickUp(event.loot, delay);
+          this.later(delay, () => {
+            const name = itemKind(event.item).name;
+            if (event.fromCache) this.crateBurst(event.at);
+            this.sparks(event.at, PICKUP_COLOR, event.fromCache ? 14 : 8, true);
+            this.effects.label(
+              this.centerOf(event.at, 1.05),
+              event.fromCache ? `${name}!` : name,
+              PICKUP_COLOR,
+            );
+          });
+          break;
+        }
+        case "pack-full":
+          this.later(heroStepped ? this.stepMs * 0.7 : 30, () =>
+            this.effects.label(
+              this.centerOf(this.expectedHero ?? this.display, 1.05),
+              "Pack full",
+              MUTED_COLOR,
+            ),
+          );
+          break;
+        case "used":
+          this.supplyUsed(event.item, event.amount);
+          break;
+        case "teleported":
+          this.waystoneJump(event.from, event.to);
+          break;
+        case "equipped": {
+          const at = this.expectedHero ?? this.display;
+          this.effects.ring(this.centerOf(at, 0.5), TILE_PIXELS * 0.9, PICKUP_COLOR, 320);
+          this.sparks(at, PICKUP_COLOR, 8, true);
+          this.hero.flash(0xfff0c8);
+          this.effects.label(this.centerOf(at, 1.05), itemKind(event.item).name, PICKUP_COLOR);
+          break;
+        }
+        case "trap-found":
+          this.later(80, () => {
+            const color = trapKind(event.kind).color;
+            this.effects.ring(this.centerOf(event.at, 0.5), TILE_PIXELS * 0.9, color, 420);
+            this.sparks(event.at, color, 6, true);
+          });
+          break;
+        case "trap-sprung": {
+          const delay = heroStepped ? this.stepMs * 0.75 : 40;
+          this.later(delay, () => this.trapSprung(event));
+          strikeAt = Math.max(strikeAt, delay + 160);
+          break;
+        }
         case "waited":
         case "no-stairs":
         case "monster-readied":
         case "spotted":
         case "not-enough-charge":
         case "camp-spent":
+        case "nothing-here":
+        case "item-unneeded":
+        case "already-equipped":
+        case "dropped":
+        case "cannot-drop":
           break;
       }
     }
@@ -399,11 +496,13 @@ export class DungeonView {
     this.ground.destroy();
     this.air.destroy();
     this.effects.clear();
+    this.loot.clear();
     const glowTexture = this.glow.texture;
     this.app.destroy({ removeView: true }, { children: true });
     glowTexture.destroy(true);
     this.sprites.destroy();
     this.creatureTextures.destroy();
+    this.lootTextures.destroy();
     this.campTextures.destroy();
     for (const textures of this.tileTextures.values()) textures.destroy();
     this.tileTextures.clear();
@@ -427,6 +526,7 @@ export class DungeonView {
     this.hero.container.zIndex = this.hero.container.y + 0.5;
     this.updateCreatures(deltaMs, seconds);
     this.updateLight(deltaMs, seconds);
+    this.loot.update(deltaMs, seconds, this.tileLook);
     this.updateParticles(deltaMs);
     this.updateCamera(deltaMs);
     this.effects.update(deltaMs);
@@ -436,6 +536,8 @@ export class DungeonView {
       this.transition !== null ||
       this.shake > 0.05 ||
       this.timers.length > 0 ||
+      this.surveyWave !== null ||
+      this.loot.busy ||
       [...this.rigs.values()].some((rig) => rig.steps.busy || rig.dying);
     if (busy) this.lastActivityMs = this.elapsedMs;
     const wantedFps = this.elapsedMs - this.lastActivityMs > IDLE_MS ? 30 : 0;
@@ -480,7 +582,9 @@ export class DungeonView {
     this.ground.clear();
     this.air.clear();
     this.effects.clear();
+    this.surveyWave = null;
     this.syncCreatures(model.floor.monsters, true);
+    this.loot.sync(model.floor.items, model.floor.traps, true);
     this.drawCamp(model.floor);
     this.drawGlowMask(model.visible);
     this.drawOverlay();
@@ -598,6 +702,10 @@ export class DungeonView {
     const strength = flicker(seconds, this.reducedMotion ? 0.3 : 1);
     const radius = this.lightRadius;
     const { x: hx, y: hy } = this.display;
+    // A Survey Lens reveals tiles only once its ripple has spread out to them.
+    const wave = this.surveyWave;
+    const waveReach = wave ? ((this.elapsedMs - wave.ms) / 1000) * SURVEY_WAVE_TILES_PER_S : 0;
+    if (wave && waveReach > MAP_WIDTH + MAP_HEIGHT) this.surveyWave = null;
     for (let index = 0; index < MAP_SIZE; index++) {
       const sprite = this.tiles[index] as Sprite;
       if (this.bedrock[index]) {
@@ -610,12 +718,21 @@ export class DungeonView {
         deltaMs,
         1 / SIGHT_FADE_MS,
       );
-      const reveal = moveToward(
-        this.reveal[index] as number,
-        this.revealTarget[index] as number,
-        deltaMs,
-        1 / REVEAL_FADE_MS,
-      );
+      const waiting =
+        wave !== null &&
+        this.sightTarget[index] === 0 &&
+        Math.hypot(
+          (index % MAP_WIDTH) - wave.origin.x,
+          Math.floor(index / MAP_WIDTH) - wave.origin.y,
+        ) > waveReach;
+      const reveal = waiting
+        ? (this.reveal[index] as number)
+        : moveToward(
+            this.reveal[index] as number,
+            this.revealTarget[index] as number,
+            deltaMs,
+            1 / REVEAL_FADE_MS,
+          );
       this.sight[index] = sight;
       this.reveal[index] = reveal;
       sprite.visible = reveal > 0;
@@ -673,9 +790,38 @@ export class DungeonView {
         alpha: 0.35 + Math.random() * 0.3,
       });
     }
+    if (!this.reducedMotion && !this.transition && Math.random() < GLINT_RATE * seconds) {
+      // Now and then, something lying in view catches the light.
+      const spots = this.loot.glintSpots(this.tileLook);
+      if (spots.length > 0) {
+        const spot = pick(spots);
+        this.air.emit({
+          shape: "dot",
+          glow: true,
+          x: (spot.x + 0.3 + Math.random() * 0.4) * TILE_PIXELS,
+          y: (spot.y + 0.35 + Math.random() * 0.3) * TILE_PIXELS,
+          vy: -3,
+          life: 0.45,
+          size: 2.2,
+          color: 0xfff4d0,
+          alpha: 0.9,
+        });
+      }
+    }
     this.ground.update(seconds);
     this.air.update(seconds);
   }
+
+  /** How a tile looks this frame, for things drawn on it (items and traps). */
+  private readonly tileLook = (index: number): TileLook => {
+    const sprite = this.tiles[index] as Sprite;
+    return {
+      shown: sprite.visible,
+      alpha: sprite.alpha,
+      tint: sprite.tint,
+      sight: this.sight[index] ?? 0,
+    };
+  };
 
   /** Eases the camera after the hero, with a little shake after bumps and blows. */
   private updateCamera(deltaMs: number): void {
@@ -777,6 +923,139 @@ export class DungeonView {
     this.effects.ring(this.centerOf(at, 0.5), (PULSE_RADIUS + 0.2) * TILE_PIXELS, 0xff8a3d, 300);
     this.sparks(at, 0xffd9a0, 24, true);
     if (!this.reducedMotion) this.shake = Math.max(this.shake, 1.2);
+  }
+
+  private supplyUsed(item: SupplyId, amount: number): void {
+    const at = this.expectedHero ?? this.display;
+    const effect = (itemKind(item) as SupplyKind).effect;
+    switch (effect.kind) {
+      case "heal":
+        this.effects.number(this.centerOf(at, 0.9), `+${amount}`, HEAL_COLOR);
+        this.sparks(at, HEAL_COLOR, 14, true);
+        this.hero.flash(HEAL_COLOR);
+        break;
+      case "vigor":
+        this.effects.number(this.centerOf(at, 0.9), `+${amount} max`, VIGOR_COLOR);
+        this.sparks(at, VIGOR_COLOR, 16, true);
+        this.hero.flash(VIGOR_COLOR);
+        break;
+      case "charge":
+        this.effects.number(this.centerOf(at, 0.9), `+${amount}`, CHARGE_COLOR);
+        this.effects.ring(this.centerOf(at, 0.5), TILE_PIXELS * 1.4, CHARGE_COLOR, 420);
+        this.sparks(at, CHARGE_COLOR, 16, true);
+        break;
+      case "shield":
+        this.effects.ring(this.centerOf(at, 0.5), TILE_PIXELS * 1.1, SHIELD_COLOR, 380);
+        this.effects.ring(this.centerOf(at, 0.5), TILE_PIXELS * 0.7, SHIELD_COLOR, 300);
+        this.effects.number(this.centerOf(at, 0.9), `+${amount}`, SHIELD_COLOR);
+        this.hero.flash(SHIELD_COLOR);
+        break;
+      case "flare":
+        this.effects.ring(
+          this.centerOf(at, 0.5),
+          (effect.radius + 0.6) * TILE_PIXELS,
+          0xffb347,
+          420,
+        );
+        this.effects.ring(
+          this.centerOf(at, 0.5),
+          (effect.radius + 0.2) * TILE_PIXELS,
+          0xff6a2a,
+          340,
+        );
+        this.flareBurst(at);
+        if (!this.reducedMotion) this.shake = Math.max(this.shake, 2.4);
+        break;
+      case "survey":
+        this.surveyWave = { origin: { x: at.x, y: at.y }, ms: this.elapsedMs };
+        this.effects.ring(this.centerOf(at, 0.5), TILE_PIXELS * 9, SURVEY_COLOR, 1000);
+        this.sparks(at, SURVEY_COLOR, 12, true);
+        break;
+      case "waystone":
+        break; // Shown by the "teleported" event that follows.
+    }
+  }
+
+  /** The hero vanishes in a shimmer and reappears at the Waystone's landing spot. */
+  private waystoneJump(from: Point, to: Point): void {
+    this.sparks(from, WAYSTONE_COLOR, 18, true);
+    this.effects.ring(this.centerOf(from, 0.5), TILE_PIXELS * 1.2, WAYSTONE_COLOR, 320);
+    this.steps.snap(to);
+    this.expectedHero = to;
+    this.display = to;
+    this.later(60, () => {
+      this.effects.ring(this.centerOf(to, 0.5), TILE_PIXELS * 1.2, WAYSTONE_COLOR, 380);
+      this.sparks(to, WAYSTONE_COLOR, 18, true);
+      this.hero.flash(WAYSTONE_COLOR);
+    });
+  }
+
+  private trapSprung(event: Extract<GameEvent, { type: "trap-sprung" }>): void {
+    const color = trapKind(event.kind).color;
+    const center = this.centerOf(event.at, 0.5);
+    switch (event.kind) {
+      case "ember-vent":
+        this.flareBurst(event.at);
+        this.heroHurt(event.damage, event.absorbed);
+        break;
+      case "alarm-glyph":
+        for (const delay of [0, 140, 280]) {
+          this.later(delay, () => this.effects.ring(center, TILE_PIXELS * 3, color, 520));
+        }
+        this.effects.label(this.centerOf(event.at, 1.1), "!!", color);
+        if (!this.reducedMotion) this.shake = Math.max(this.shake, 1.4);
+        break;
+      case "gloom-rune":
+        this.effects.ring(center, TILE_PIXELS * 1.4, color, 460);
+        this.sparks(event.at, 0x5a3aa0, 18, true);
+        if (event.drained > 0)
+          this.effects.number(this.centerOf(event.at, 0.9), `-${event.drained}`, color);
+        break;
+    }
+  }
+
+  /** Fire leaping up from a tile: a flare bursting, or an ember vent going off. */
+  private flareBurst(tile: Point): void {
+    if (this.reducedMotion) return;
+    for (let i = 0; i < 26; i++) {
+      this.air.emit({
+        shape: i % 3 === 0 ? "pixel" : "dot",
+        glow: true,
+        x: (tile.x + 0.5) * TILE_PIXELS + (Math.random() * 8 - 4),
+        y: (tile.y + 0.85) * TILE_PIXELS,
+        vx: Math.random() * 30 - 15,
+        vy: -30 - Math.random() * 45,
+        gravity: 10,
+        drag: 2.5,
+        life: 0.35 + Math.random() * 0.45,
+        size: 1.2 + Math.random() * 1.8,
+        color: pick(FLARE_COLORS),
+        alpha: 0.95,
+      });
+    }
+  }
+
+  /** Splinters flying as a supply cache is broken open. */
+  private crateBurst(tile: Point): void {
+    if (this.reducedMotion) return;
+    const center = this.centerOf(tile, 0.4);
+    for (let i = 0; i < 12; i++) {
+      const angle = -Math.PI * (0.1 + Math.random() * 0.8);
+      const speed = 25 + Math.random() * 35;
+      this.ground.emit({
+        shape: "pixel",
+        x: center.x,
+        y: center.y,
+        vx: Math.cos(angle) * speed,
+        vy: Math.sin(angle) * speed,
+        gravity: 90,
+        drag: 1.5,
+        life: 0.45 + Math.random() * 0.25,
+        size: 1 + Math.random() * 0.8,
+        color: pick(CRATE_COLORS),
+        alpha: 1,
+      });
+    }
   }
 
   /** A burst of sparks from a tile; `rise` makes them float up instead of scattering. */
@@ -887,6 +1166,7 @@ export class DungeonView {
     this.hover = tile;
     this.markActive();
     this.drawOverlay();
+    this.onHover?.(tile);
   }
 
   /** Outlines the tile under the mouse and previews the route a click would walk. */
@@ -898,9 +1178,9 @@ export class DungeonView {
     if (!model || !target || !model.floor.explored[indexOf(target)]) return;
     if (samePoint(target, model.hero)) return;
 
-    const explored = (index: number) => model.floor.explored[index] === true;
+    // The same route a click would walk: around creatures and known traps.
     const route = isWalkable(tileAt(model.floor.tiles, target))
-      ? findPath(model.floor.tiles, model.hero, target, explored)
+      ? walkRoute(model.floor, model.hero, target)
       : null;
     const color = route ? ROUTE_COLOR : NO_ROUTE_COLOR;
     const line = 1 / this.scale;

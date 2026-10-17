@@ -17,7 +17,9 @@ import { SaveStore } from "./save-store";
 
 /** When set, the app renders once, saves a screenshot and report to this path, then quits. */
 const smokeScreenshotPath = process.env.EMBERCRAWL_SMOKE_SCREENSHOT;
-const smokeScene: Scene = process.env.EMBERCRAWL_SMOKE_SCENE === "game" ? "game" : "title";
+const SMOKE_SCENES: readonly Scene[] = ["title", "game", "pack"];
+const smokeScene: Scene =
+  SMOKE_SCENES.find((scene) => scene === process.env.EMBERCRAWL_SMOKE_SCENE) ?? "title";
 
 // Development builds keep their own saves, so testing never touches a player's real characters.
 // Tests can point the app at a throwaway folder instead.
@@ -154,7 +156,7 @@ function createMainWindow(): BrowserWindow {
   });
 
   // Smoke tests can open straight into the game; normal launches show the title screen.
-  const hash = smokeScreenshotPath && smokeScene === "game" ? "scene=game" : undefined;
+  const hash = smokeScreenshotPath && smokeScene !== "title" ? `scene=${smokeScene}` : undefined;
   if (devServerUrl) void window.loadURL(hash ? `${devServerUrl}#${hash}` : devServerUrl);
   else void window.loadFile(rendererFile, hash ? { hash } : {});
   return window;

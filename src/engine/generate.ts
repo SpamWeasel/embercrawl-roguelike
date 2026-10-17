@@ -1,14 +1,38 @@
 import { CREATURES, type CreatureKind, type Monster } from "./creatures";
-import { type Point, samePoint } from "./geometry";
+import { chebyshevDistance, type Point, samePoint } from "./geometry";
+import {
+  ARMORS,
+  CACHE,
+  type FloorItem,
+  type GearId,
+  type GearKind,
+  type LootId,
+  SUPPLIES,
+  type SupplyId,
+  TRAPS,
+  type Trap,
+  WEAPONS,
+} from "./items";
 import { FLOOR_COUNT, indexOf, MAP_SIZE, pointOf, Tile, type TileKind } from "./map";
 import { stepDistances } from "./path";
 import { Rng } from "./rng";
 import {
   CREATURE_LIFESPAN,
   creatureCount,
+  GEAR_FIRST_FLOOR,
+  GEAR_SLOT_BIAS,
+  gearWeight,
+  hasCache,
   NEW_CREATURE_WINDOW,
+  recoverySupply,
   SPAWN_CLEARANCE,
   scaledStats,
+  supplyCount,
+  supplyWeight,
+  TRAP_CLEARANCE,
+  trapCount,
+  trapPower,
+  trapWeight,
 } from "./rules";
 
 export interface Floor {
@@ -28,6 +52,10 @@ export interface Floor {
   readonly campUsed: boolean;
   /** Living creatures on this floor. */
   readonly monsters: readonly Monster[];
+  /** Supplies, gear and caches lying on the floor. At most one per tile. */
+  readonly items: readonly FloorItem[];
+  /** Traps not yet sprung, found or hidden. */
+  readonly traps: readonly Trap[];
 }
 
 /** The camp sits between this share and the next of the farthest walking distance from the entrance. */
@@ -87,6 +115,8 @@ export function generateFloor(seed: number, depth: number): Floor {
   const camp = pickCamp(rng, distances, roomTiles, reserved);
   if (camp) reserved.push(camp);
   const monsters = spawnCreatures(rng, depth, tiles, distances, reserved);
+  const items = placeItems(rng, depth, tiles, entrance, [...reserved, ...monsters]);
+  const traps = placeTraps(rng, depth, tiles, distances, [...reserved, ...monsters, ...items]);
 
   return {
     depth,
@@ -98,7 +128,111 @@ export function generateFloor(seed: number, depth: number): Floor {
     camp,
     campUsed: false,
     monsters,
+    items,
+    traps,
   };
+}
+
+/** Open floor tiles (not stairs) that nothing else is using. */
+function freeTiles(tiles: readonly TileKind[], taken: readonly Point[]): Point[] {
+  const free: Point[] = [];
+  for (let index = 0; index < tiles.length; index++) {
+    if (tiles[index] !== Tile.Floor) continue;
+    const point = pointOf(index);
+    if (!taken.some((t) => samePoint(t, point))) free.push(point);
+  }
+  return free;
+}
+
+/**
+ * Supplies, a cache and a piece of gear, spread around the floor. Floor 1 also leaves a salve
+ * right beside the entrance, so the very first find is close at hand.
+ */
+function placeItems(
+  rng: Rng,
+  depth: number,
+  tiles: readonly TileKind[],
+  entrance: Point,
+  taken: readonly Point[],
+): FloorItem[] {
+  const free = freeTiles(tiles, taken);
+  const items: FloorItem[] = [];
+  const put = (item: LootId, choices: readonly Point[]) => {
+    if (choices.length === 0) return;
+    const at = rng.pick(choices);
+    free.splice(
+      free.findIndex((p) => samePoint(p, at)),
+      1,
+    );
+    items.push({ id: `${depth}-i${items.length + 1}`, item, x: at.x, y: at.y });
+  };
+  // Keep finds apart where there's room, so they don't clump together.
+  const apart = () => {
+    const spread = free.filter((p) => items.every((item) => chebyshevDistance(item, p) > 1));
+    return spread.length > 0 ? spread : free;
+  };
+
+  if (depth === 1)
+    put(
+      "salve",
+      free.filter((p) => chebyshevDistance(p, entrance) === 1),
+    );
+  for (let i = 0; i < supplyCount(depth); i++) put(pickSupply(rng, depth), apart());
+  const recovery = recoverySupply(depth);
+  if (recovery) put(recovery, apart());
+  if (hasCache(depth)) put(CACHE, apart());
+  if (depth >= GEAR_FIRST_FLOOR) put(pickGear(rng, depth), apart());
+  return items;
+}
+
+export function pickSupply(rng: Rng, depth: number): SupplyId {
+  const pool = SUPPLIES.filter((s) => supplyWeight(s.id, depth) > 0);
+  return weightedPick(rng, pool, (s) => supplyWeight(s.id, depth)).id;
+}
+
+/** Even floors favor weapons and odd floors armor; recent tiers are the most common. */
+function pickGear(rng: Rng, depth: number): GearId {
+  const weapons: readonly GearKind[] = WEAPONS;
+  const armors: readonly GearKind[] = ARMORS;
+  const [favored, other] = depth % 2 === 0 ? [weapons, armors] : [armors, weapons];
+  const found = (rng.chance(GEAR_SLOT_BIAS) ? favored : other).filter((g) => !g.starter);
+  const guardianFloor = CREATURES.some((c) => "guardian" in c && c.firstFloor === depth);
+  const pool = found.filter((g) => gearWeight(g.tier, depth, guardianFloor) > 0);
+  // Every floor in the game has gear in reach; this fallback only guards against catalog changes.
+  const chosen =
+    pool.length > 0
+      ? weightedPick(rng, pool, (g) => gearWeight(g.tier, depth, guardianFloor))
+      : (found.filter((g) => g.tier <= depth).at(-1) ?? (found[0] as GearKind));
+  return chosen.id as GearId;
+}
+
+/** Hidden traps anywhere on open floor, though never right by the entrance. */
+function placeTraps(
+  rng: Rng,
+  depth: number,
+  tiles: readonly TileKind[],
+  distances: readonly number[],
+  taken: readonly Point[],
+): Trap[] {
+  const free = freeTiles(tiles, taken).filter(
+    (p) => (distances[indexOf(p)] ?? -1) > TRAP_CLEARANCE,
+  );
+  const kinds = TRAPS.filter((t) => t.firstFloor <= depth);
+  const traps: Trap[] = [];
+  for (let i = 0; i < trapCount(depth) && free.length > 0 && kinds.length > 0; i++) {
+    const at = rng.pick(free);
+    free.splice(free.indexOf(at), 1);
+    const kind = weightedPick(rng, kinds, (t) => trapWeight(t.id)).id;
+    traps.push({
+      id: `${depth}-t${i + 1}`,
+      kind,
+      x: at.x,
+      y: at.y,
+      power: trapPower(kind, depth, rng.int(0, 2)),
+      found: false,
+    });
+  }
+  return traps;
 }
 
 /** A room tile roughly midway through the floor, so a rest comes partway down. */

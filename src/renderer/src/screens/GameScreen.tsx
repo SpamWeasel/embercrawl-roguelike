@@ -5,18 +5,23 @@ import {
   type Action,
   availableInteraction,
   currentFloor,
+  type Interaction,
   sightRadius,
   visibleTiles,
 } from "../../../engine/run";
 import type { CharacterSave } from "../../../engine/save";
 import type { ReadyDetails, SaveBridge } from "../../../shared/bridge";
+import { lootName } from "../game/itemText";
 import { describeResult } from "../game/messages";
 import { useCharacterSession } from "../game/useCharacterSession";
 import { useGameKeys } from "../input/useGameKeys";
 import { DungeonCanvas } from "../render/dungeon/DungeonCanvas";
 import { paletteForFloor } from "../render/dungeon/palettes";
+import { InventoryPanel } from "./game/InventoryPanel";
+import { TileTooltip } from "./game/ItemDetails";
 import { type LogEntry, MessageLog } from "./game/MessageLog";
 import { DeathScreen, IntroCard, PauseMenu } from "./game/Overlays";
+import { GearSlots, PackBar } from "./game/PackBar";
 import { StatMeters } from "./game/StatMeters";
 
 /** How many log lines stay on screen. */
@@ -27,6 +32,8 @@ const DEATH_SCREEN_DELAY_MS = 1300;
 interface GameScreenProps {
   initial: CharacterSave;
   saves: SaveBridge;
+  /** Opens with the pack showing (for the smoke test). */
+  startWithPack?: boolean;
   onExit(): void;
   onReady(details: ReadyDetails): void;
 }
@@ -38,11 +45,26 @@ interface Banner {
   readonly region: string;
 }
 
-export function GameScreen({ initial, saves, onExit, onReady }: GameScreenProps) {
+function interactionLabel(interaction: Interaction): string {
+  switch (interaction.kind) {
+    case "rest":
+      return "Rest by the fire";
+    case "descend":
+      return `Descend to floor ${interaction.toDepth}`;
+    case "ascend":
+      return `Climb up to floor ${interaction.toDepth}`;
+    case "pick-up":
+      return `Pick up ${lootName(interaction.item)}`;
+  }
+}
+
+export function GameScreen({ initial, saves, startWithPack, onExit, onReady }: GameScreenProps) {
   const session = useCharacterSession(initial, saves);
   const { character, act, walkTo, cancelWalk, flush, subscribe, beginNewDescent } = session;
   const run = character.run;
   const [menuOpen, setMenuOpen] = useState(false);
+  const [packOpen, setPackOpen] = useState(startWithPack === true);
+  const [hoverTile, setHoverTile] = useState<Point | null>(null);
   const [leaving, setLeaving] = useState(false);
   const [log, setLog] = useState<LogEntry[]>([]);
   const logCount = useRef(0);
@@ -108,14 +130,25 @@ export function GameScreen({ initial, saves, onExit, onReady }: GameScreenProps)
   );
 
   const interact = useCallback(() => {
-    if (run && availableInteraction(run)?.kind === "rest") perform({ type: "rest" });
+    const kind = run ? availableInteraction(run)?.kind : undefined;
+    if (kind === "rest") perform({ type: "rest" });
+    else if (kind === "pick-up") perform({ type: "pick-up" });
     else perform({ type: "use-stairs" });
   }, [run, perform]);
+
+  const applySlot = useCallback((slot: number) => perform({ type: "use-item", slot }), [perform]);
+  const dropSlot = useCallback((slot: number) => perform({ type: "drop-item", slot }), [perform]);
 
   const openMenu = useCallback(() => {
     cancelWalk();
     setMenuOpen(true);
   }, [cancelWalk]);
+
+  const openPack = useCallback(() => {
+    cancelWalk();
+    setPackOpen(true);
+  }, [cancelWalk]);
+  const closePack = useCallback(() => setPackOpen(false), []);
 
   useGameKeys(
     {
@@ -125,8 +158,10 @@ export function GameScreen({ initial, saves, onExit, onReady }: GameScreenProps)
       toggleLight: () => perform({ type: "toggle-light" }),
       pulse: () => perform({ type: "pulse" }),
       menu: openMenu,
+      inventory: openPack,
+      itemSlot: applySlot,
     },
-    alive && !menuOpen && !leaving && !introOpen,
+    alive && !menuOpen && !leaving && !introOpen && !packOpen,
   );
 
   const onTileClick = useCallback(
@@ -175,7 +210,8 @@ export function GameScreen({ initial, saves, onExit, onReady }: GameScreenProps)
         model={model}
         subscribe={subscribe}
         onTileClick={onTileClick}
-        onReady={(renderer) => onReady({ renderer, scene: "game" })}
+        onHover={setHoverTile}
+        onReady={(renderer) => onReady({ renderer, scene: startWithPack ? "pack" : "game" })}
       />
       {lowHealth && <div className="low-health pointer-events-none absolute inset-0 z-[5]" />}
 
@@ -206,24 +242,37 @@ export function GameScreen({ initial, saves, onExit, onReady }: GameScreenProps)
       </header>
 
       <footer className="hud-bar hud-bottom">
-        {interaction && alive && (
-          <button type="button" className="btn btn-primary" onClick={interact}>
-            {interaction.kind === "rest"
-              ? "Rest by the fire"
-              : interaction.kind === "descend"
-                ? `Descend to floor ${interaction.toDepth}`
-                : `Climb up to floor ${interaction.toDepth}`}
-            <kbd className="kbd">Enter</kbd>
-          </button>
-        )}
-        <MessageLog entries={log} />
-        <p className="text-xs text-bone/45">
-          Move <kbd className="kbd">WASD</kbd> / arrows · diagonals{" "}
-          <kbd className="kbd">Q E Z C</kbd> · attack by moving into a creature · wait{" "}
-          <kbd className="kbd">Space</kbd> · lantern <kbd className="kbd">L</kbd> · pulse{" "}
-          <kbd className="kbd">F</kbd> · use <kbd className="kbd">Enter</kbd>
-        </p>
+        <div className="justify-self-start">
+          <GearSlots run={run} onOpen={openPack} />
+        </div>
+        <div className="flex min-w-0 flex-col items-center gap-2">
+          {interaction && alive && (
+            <button type="button" className="btn btn-primary" onClick={interact}>
+              {interactionLabel(interaction)}
+              <kbd className="kbd">Enter</kbd>
+            </button>
+          )}
+          <MessageLog entries={log} />
+          <p className="text-center text-xs text-bone/45">
+            Move <kbd className="kbd">WASD</kbd> / arrows · diagonals{" "}
+            <kbd className="kbd">Q E Z C</kbd> · wait <kbd className="kbd">Space</kbd> · lantern{" "}
+            <kbd className="kbd">L</kbd> · pulse <kbd className="kbd">F</kbd> · pack{" "}
+            <kbd className="kbd">I</kbd> · items <kbd className="kbd">1</kbd>–
+            <kbd className="kbd">0</kbd> · use <kbd className="kbd">Enter</kbd>
+          </p>
+        </div>
+        <div className="justify-self-end">
+          <PackBar run={run} onUse={applySlot} onOpen={openPack} />
+        </div>
       </footer>
+
+      {packOpen && alive && (
+        <InventoryPanel run={run} onUse={applySlot} onDrop={dropSlot} onClose={closePack} />
+      )}
+
+      {hoverTile && alive && !packOpen && !menuOpen && !introOpen && (
+        <TileTooltip run={run} tile={hoverTile} />
+      )}
 
       {session.saveError && (
         <p role="alert" className="save-warning">

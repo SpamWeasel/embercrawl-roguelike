@@ -9,6 +9,8 @@ interface DungeonCanvasProps {
   /** Subscribes to every action result, so steps can be animated as they happen. */
   subscribe(listener: ActionListener): () => void;
   onTileClick(tile: Point): void;
+  /** The tile under the mouse changed (null when it leaves the map). */
+  onHover?(tile: Point | null): void;
   /** Called once the first frame of the dungeon has been drawn. */
   onReady?(rendererName: string): void;
 }
@@ -21,13 +23,14 @@ export function DungeonCanvas({
   className,
   subscribe,
   onTileClick,
+  onHover,
   onReady,
 }: DungeonCanvasProps) {
   const hostRef = useRef<HTMLDivElement>(null);
   const viewRef = useRef<DungeonView | null>(null);
   // The view is created once; these refs let it always call the latest props.
-  const latest = useRef({ model, onTileClick, onReady });
-  latest.current = { model, onTileClick, onReady };
+  const latest = useRef({ model, onTileClick, onHover, onReady });
+  latest.current = { model, onTileClick, onHover, onReady };
 
   useEffect(() => {
     const host = hostRef.current;
@@ -35,6 +38,7 @@ export function DungeonCanvas({
     let disposed = false;
     DungeonView.create(host, {
       onTileClick: (tile) => latest.current.onTileClick(tile),
+      onHover: (tile) => latest.current.onHover?.(tile),
       reducedMotion: prefersReducedMotion(),
     })
       .then((view) => {

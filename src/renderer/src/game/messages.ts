@@ -1,6 +1,20 @@
 import { creatureKind } from "../../../engine/creatures";
+import {
+  CACHE,
+  type GearKind,
+  itemKind,
+  type SupplyId,
+  type SupplyKind,
+} from "../../../engine/items";
 import { indexOf } from "../../../engine/map";
-import { type ActionResult, currentFloor, type GameEvent, visibleTiles } from "../../../engine/run";
+import {
+  type ActionResult,
+  currentFloor,
+  type GameEvent,
+  type UnneededReason,
+  visibleTiles,
+} from "../../../engine/run";
+import { lootName, trapName, withArticle } from "./itemText";
 
 export type Tone = "info" | "combat" | "danger" | "good";
 
@@ -28,6 +42,8 @@ export function describeResult(result: ActionResult): LogLine[] {
   const lines: LogLine[] = [];
   const killed = new Set(of("monster-died").map((e) => e.id));
   const attacked = new Set(of("attacked").map((e) => e.target));
+  // A Survey Lens reveals traps all at once; its own line says how many.
+  const surveyed = of("used").some((e) => e.item === "survey-lens");
 
   const noticed = of("monster-noticed").filter((e) => inView(e.id));
   const [first] = noticed;
@@ -71,6 +87,8 @@ export function describeResult(result: ActionResult): LogLine[] {
       case "lantern":
         if (event.reason === "empty")
           lines.push({ text: "Your lantern sputters and dims.", tone: "danger" });
+        else if (event.reason === "doused")
+          lines.push({ text: "The bright light gutters out.", tone: "danger" });
         else
           lines.push({
             text: event.bright ? "Your lantern blazes brighter." : "You shade your lantern.",
@@ -101,6 +119,65 @@ export function describeResult(result: ActionResult): LogLine[] {
       case "no-stairs":
         lines.push({ text: "There's nothing here to use.", tone: "info" });
         break;
+      case "picked-up": {
+        const name = lootName(event.item);
+        lines.push({
+          text: event.fromCache
+            ? `You break open a cache and find ${withArticle(name)}.`
+            : `You pick up ${withArticle(name)}.`,
+          tone: "good",
+        });
+        break;
+      }
+      case "pack-full":
+        lines.push({
+          text:
+            event.item === CACHE
+              ? "Your pack is full; the cache stays shut."
+              : `Your pack is full; the ${lootName(event.item)} stays where it is.`,
+          tone: "info",
+        });
+        break;
+      case "nothing-here":
+        lines.push({ text: "There's nothing here to pick up.", tone: "info" });
+        break;
+      case "used":
+        lines.push({ text: describeUse(event.item, event.amount), tone: "good" });
+        break;
+      case "item-unneeded":
+        lines.push({ text: UNNEEDED[event.reason], tone: "info" });
+        break;
+      case "equipped": {
+        const kind = itemKind(event.item) as GearKind;
+        const change = kind.power - (itemKind(event.previous) as GearKind).power;
+        const stat = kind.category === "weapon" ? "attack" : "defense";
+        const verb = kind.category === "weapon" ? "You ready the" : "You put on the";
+        lines.push({
+          text: `${verb} ${kind.name} (${change >= 0 ? "+" : ""}${change} ${stat}).`,
+          tone: change >= 0 ? "good" : "info",
+        });
+        break;
+      }
+      case "already-equipped":
+        lines.push({ text: `You already have the ${lootName(event.item)} on.`, tone: "info" });
+        break;
+      case "dropped":
+        lines.push({ text: `You set down the ${lootName(event.item)}.`, tone: "info" });
+        break;
+      case "cannot-drop":
+        lines.push({ text: "There's no room to set anything down here.", tone: "info" });
+        break;
+      case "trap-found":
+        if (!surveyed) {
+          lines.push({
+            text: `Your light shows ${withArticle(trapName(event.kind))}!`,
+            tone: "danger",
+          });
+        }
+        break;
+      case "trap-sprung":
+        lines.push({ text: describeTrap(event), tone: "danger" });
+        break;
       case "died":
         lines.push({ text: "You have fallen.", tone: "danger" });
         break;
@@ -109,4 +186,50 @@ export function describeResult(result: ActionResult): LogLine[] {
     }
   }
   return lines;
+}
+
+const UNNEEDED: Readonly<Record<UnneededReason, string>> = {
+  "full-health": "You're already at full health.",
+  "full-charge": "Your lantern is already full.",
+  "no-targets": "There are no creatures in reach.",
+};
+
+function describeUse(item: SupplyId, amount: number): string {
+  const kind = itemKind(item) as SupplyKind;
+  const name = kind.name;
+  const plural = (count: number, word: string) => `${count} ${word}${count === 1 ? "" : "s"}`;
+  switch (kind.effect.kind) {
+    case "heal":
+      return `You use ${withArticle(name)} (+${amount} health).`;
+    case "charge":
+      return `The ${name} feeds your lantern (+${amount} charge).`;
+    case "shield":
+      return `The ${name} wraps you in a ward (+${amount} shield).`;
+    case "vigor":
+      return `You drink the ${name} (+${amount} max health).`;
+    case "flare":
+      return `The ${name} bursts over ${plural(amount, "creature")}.`;
+    case "survey":
+      return amount > 0
+        ? `The ${name} shows the whole floor, and ${plural(amount, "hidden trap")}.`
+        : `The ${name} shows the whole floor.`;
+    case "waystone":
+      return `The ${name} carries you somewhere quiet.`;
+  }
+}
+
+function describeTrap(event: Extract<GameEvent, { type: "trap-sprung" }>): string {
+  const trap = withArticle(trapName(event.kind)).replace(/^a/, "A");
+  switch (event.kind) {
+    case "ember-vent": {
+      const shield = event.absorbed > 0 ? ` (your shield takes ${event.absorbed})` : "";
+      return `${trap} erupts beneath you for ${event.damage}${shield}!`;
+    }
+    case "alarm-glyph":
+      return event.woke > 0
+        ? `${trap} shrieks, waking ${event.woke} creature${event.woke === 1 ? "" : "s"}!`
+        : `${trap} shrieks into the dark!`;
+    case "gloom-rune":
+      return `${trap} drinks ${event.drained} charge from your lantern.`;
+  }
 }

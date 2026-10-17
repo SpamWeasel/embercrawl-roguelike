@@ -73,6 +73,22 @@ body {
   }
 }
 
+@keyframes slide-in {
+  from {
+    opacity: 0;
+    transform: translateX(14px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+/** Drawn placeholder art: keep its pixels square when scaled up. */
+.pixelated {
+  image-rendering: pixelated;
+}
+
 /** A red glow at the screen's edges while health is low. */
 .low-health {
   background: radial-gradient(ellipse at center, transparent 55%, rgb(200 30 20 / 0.42) 100%);
@@ -96,6 +112,10 @@ body {
   .floor-banner {
     /* Unlayered, so this already beats the component style below without !important. */
     animation-duration: 1.6s;
+  }
+
+  .inventory-panel {
+    animation: none;
   }
 }
 
@@ -141,8 +161,64 @@ body {
     @apply top-0 items-center justify-between bg-linear-to-b;
   }
 
+  /** Worn gear on the left, messages in the middle, the pack's slots on the right. */
   .hud-bottom {
-    @apply bottom-0 flex-col items-center gap-2 bg-linear-to-t;
+    @apply bottom-0 grid grid-cols-[minmax(max-content,1fr)_minmax(0,44rem)_minmax(max-content,1fr)] items-end gap-4 bg-linear-to-t;
+  }
+
+  .hud-link {
+    @apply inline-flex cursor-pointer items-center gap-1.5 text-[11px] tracking-wider text-bone/60 uppercase transition-colors hover:text-ember;
+  }
+
+  /** A pack or gear slot: an item icon with its key number and stack count. */
+  .slot {
+    @apply relative grid size-10 cursor-pointer place-items-center rounded-md border border-white/12 bg-black/50 transition-colors hover:border-ember/60 hover:bg-ember/10 focus-visible:outline-2 focus-visible:outline-ember aria-disabled:cursor-default aria-disabled:hover:border-white/12 aria-disabled:hover:bg-black/50;
+  }
+
+  .slot--large {
+    @apply size-14;
+  }
+
+  .slot--worn {
+    @apply h-auto w-14 gap-0.5 py-1;
+  }
+
+  .slot--selected {
+    @apply border-ember bg-ember/15 ring-1 ring-ember/60;
+  }
+
+  .slot-key {
+    @apply pointer-events-none absolute top-0.5 left-1 font-mono text-[9px] leading-none text-bone/45;
+  }
+
+  .slot-count {
+    @apply pointer-events-none absolute right-1 bottom-0.5 font-mono text-[11px] leading-none font-bold text-bone [text-shadow:0_1px_2px_#000];
+  }
+
+  .slot-stat {
+    @apply font-mono text-[10px] leading-none text-bone/60;
+  }
+
+  .item-frame {
+    @apply shrink-0 rounded-md bg-black/35 p-0.5 ring-1 ring-white/10;
+  }
+
+  .tooltip {
+    @apply pointer-events-none fixed top-0 left-0 z-30 flex max-w-80 flex-col gap-2 rounded-lg border border-white/12 bg-[#16141b]/95 p-3 shadow-2xl shadow-black/70;
+  }
+
+  .tooltip-text {
+    @apply text-[12.5px] leading-snug text-bone/70;
+  }
+
+  .tooltip-hint {
+    @apply border-t border-white/10 pt-2 text-[11px] text-bone/50;
+  }
+
+  /** The pack, opened beside the dungeon so the fight stays in view. */
+  .inventory-panel {
+    @apply absolute top-16 right-4 z-20 flex max-h-[calc(100dvh-12rem)] w-[22rem] flex-col gap-3 overflow-y-auto p-4;
+    animation: slide-in 0.18s ease-out both;
   }
 
   .hud-bar :is(button, a) {

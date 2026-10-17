@@ -1,7 +1,7 @@
 import { useEffect, useRef } from "react";
-import { creatureKind } from "../../../../engine/creatures";
 import type { RunState } from "../../../../engine/run";
 import { toggleFullscreen } from "../../fullscreen";
+import { causeName } from "../../game/itemText";
 import { INTRO_LINES, INTRO_TITLE } from "../../game/lore";
 
 /** Calls `onKey` for the given key codes while mounted. */
@@ -75,7 +75,7 @@ export function DeathScreen({
 }) {
   const focusRef = useFocusOnMount<HTMLButtonElement>();
   useKeys(NEW_DESCENT_KEYS, onNewDescent);
-  const slayer = run.killedBy ? creatureKind(run.killedBy).name : null;
+  const slayer = run.killedBy ? causeName(run.killedBy) : null;
   const stats: Array<[string, number]> = [
     ["Floor", run.depth],
     ["Level", run.hero.level],
@@ -95,7 +95,7 @@ export function DeathScreen({
           You have fallen
         </h2>
         <p className="text-bone/80">
-          {slayer ? `Slain by a ${slayer} on floor ${run.depth}.` : `Lost on floor ${run.depth}.`}
+          {slayer ? `Slain by ${slayer} on floor ${run.depth}.` : `Lost on floor ${run.depth}.`}
         </p>
         <dl className="grid grid-cols-2 gap-x-8 gap-y-1 text-sm">
           {stats.map(([label, value]) => (

@@ -1,5 +1,5 @@
 import { type CreatureId, creatureKind, type Monster } from "./creatures";
-import { type Floor, generateFloor } from "./generate";
+import { type Floor, generateFloor, pickSupply } from "./generate";
 import {
   chebyshevDistance,
   DIRECTION_VECTORS,
@@ -10,15 +10,39 @@ import {
   samePoint,
   step,
 } from "./geometry";
-import { canStep, FLOOR_COUNT, indexOf, Tile, tileAt } from "./map";
-import { stepDistances } from "./path";
+import {
+  type ArmorId,
+  CACHE,
+  type Equipment,
+  type FloorItem,
+  type GearId,
+  type GearKind,
+  type ItemId,
+  isSupply,
+  itemKind,
+  type LootId,
+  type Pack,
+  STARTING_ARMOR,
+  STARTING_WEAPON,
+  type SupplyId,
+  type SupplyKind,
+  type Trap,
+  type TrapKind,
+  type WeaponId,
+} from "./items";
+import { canStep, FLOOR_COUNT, indexOf, MAP_SIZE, pointOf, Tile, tileAt } from "./map";
+import { emptyPack, packAdd, packRemoveOne } from "./pack";
+import { findPath, stepDistances } from "./path";
 import { Rng, type RngState } from "./rng";
 import {
   BRIGHT_COST,
   BRIGHT_SIGHT,
   CAMP_CHARGE,
   CAMP_HEAL_SHARE,
+  CREATURE_HIT_SPREAD,
+  creatureHit,
   DIM_SIGHT,
+  HERO_HIT_SPREAD,
   HERO_START_HP,
   heroAttackPower,
   heroDefense,
@@ -31,6 +55,9 @@ import {
   PULSE_RADIUS,
   PULSE_SHIELD,
   RANGED_REACH,
+  TRAP_SPOT_RANGE,
+  WAYSTONE_CLEARANCE,
+  WAYSTONE_MIN_JUMP,
   xpToNextLevel,
 } from "./rules";
 import { computeVisible, hasLineOfSight } from "./sight";
@@ -52,6 +79,9 @@ export interface Lantern {
   readonly bright: boolean;
 }
 
+/** What ended a descent: a creature, or a trap. */
+export type Cause = CreatureId | TrapKind;
+
 /** One descent: everything needed to resume exactly where the player left off. */
 export interface RunState {
   readonly seed: number;
@@ -61,13 +91,15 @@ export interface RunState {
   readonly floors: readonly Floor[];
   readonly hero: Hero;
   readonly lantern: Lantern;
+  readonly equipment: Equipment;
+  readonly pack: Pack;
   /** The gameplay random stream (combat rolls, erratic steps), separate from floor generation. */
   readonly rng: RngState;
   readonly kills: number;
   /** Creature kinds seen during this descent. */
   readonly discovered: readonly CreatureId[];
   readonly status: "active" | "dead";
-  readonly killedBy: CreatureId | null;
+  readonly killedBy: Cause | null;
 }
 
 export type Action =
@@ -76,7 +108,16 @@ export type Action =
   | { readonly type: "use-stairs" }
   | { readonly type: "rest" }
   | { readonly type: "toggle-light" }
-  | { readonly type: "pulse" };
+  | { readonly type: "pulse" }
+  /** Picks up what lies underfoot (stepping onto an item does this automatically). */
+  | { readonly type: "pick-up" }
+  /** Uses the supply, or equips the weapon or armor, in a pack slot. */
+  | { readonly type: "use-item"; readonly slot: number }
+  /** Sets one item from a pack slot down where the hero stands. */
+  | { readonly type: "drop-item"; readonly slot: number };
+
+/** Why a supply wasn't used (it would have been wasted). */
+export type UnneededReason = "full-health" | "full-charge" | "no-targets";
 
 /** What happened during an action, for animation and the message log. */
 export type GameEvent =
@@ -96,6 +137,14 @@ export type GameEvent =
       readonly kind: CreatureId;
       readonly at: Point;
       readonly direction: Direction;
+      readonly damage: number;
+    }
+  /** Damage from an area effect (a pulse or a flare); blows are reported by "attacked". */
+  | {
+      readonly type: "monster-hurt";
+      readonly id: string;
+      readonly kind: CreatureId;
+      readonly at: Point;
       readonly damage: number;
     }
   | {
@@ -124,12 +173,63 @@ export type GameEvent =
     }
   | { readonly type: "leveled-up"; readonly level: number }
   | { readonly type: "spotted"; readonly kind: CreatureId }
-  | { readonly type: "lantern"; readonly bright: boolean; readonly reason: "toggled" | "empty" }
+  | {
+      readonly type: "lantern";
+      readonly bright: boolean;
+      readonly reason: "toggled" | "empty" | "doused";
+    }
   | { readonly type: "pulsed"; readonly at: Point; readonly hits: number }
   | { readonly type: "not-enough-charge"; readonly needed: number }
   | { readonly type: "rested"; readonly healed: number; readonly charge: number }
   | { readonly type: "camp-spent" }
-  | { readonly type: "died"; readonly by: CreatureId };
+  | {
+      readonly type: "picked-up";
+      /** The floor item's id, so its sprite can be animated away. */
+      readonly loot: string;
+      readonly item: ItemId;
+      readonly at: Point;
+      readonly fromCache: boolean;
+    }
+  | { readonly type: "pack-full"; readonly item: LootId }
+  | { readonly type: "nothing-here" }
+  | {
+      readonly type: "used";
+      readonly item: SupplyId;
+      /**
+       * What it achieved: health healed, charge restored, shield gained, maximum health gained,
+       * creatures hit (flare) or traps revealed (survey). Zero for a Waystone.
+       */
+      readonly amount: number;
+    }
+  | { readonly type: "item-unneeded"; readonly item: SupplyId; readonly reason: UnneededReason }
+  | { readonly type: "teleported"; readonly from: Point; readonly to: Point }
+  | {
+      readonly type: "equipped";
+      readonly item: GearId;
+      readonly slot: "weapon" | "armor";
+      readonly previous: GearId;
+    }
+  | { readonly type: "already-equipped"; readonly item: GearId }
+  | { readonly type: "dropped"; readonly loot: string; readonly item: ItemId; readonly at: Point }
+  | { readonly type: "cannot-drop" }
+  | {
+      readonly type: "trap-found";
+      readonly id: string;
+      readonly kind: TrapKind;
+      readonly at: Point;
+    }
+  | {
+      readonly type: "trap-sprung";
+      readonly id: string;
+      readonly kind: TrapKind;
+      readonly at: Point;
+      readonly damage: number;
+      readonly absorbed: number;
+      readonly drained: number;
+      /** Creatures the alarm woke. */
+      readonly woke: number;
+    }
+  | { readonly type: "died"; readonly by: Cause };
 
 export interface ActionResult {
   readonly run: RunState;
@@ -141,7 +241,8 @@ export interface ActionResult {
 /** What the hero can do on the current tile, for the on-screen prompt. */
 export type Interaction =
   | { readonly kind: "descend" | "ascend"; readonly toDepth: number }
-  | { readonly kind: "rest" };
+  | { readonly kind: "rest" }
+  | { readonly kind: "pick-up"; readonly item: LootId };
 
 export function newRun(seed: number): RunState {
   const floor = generateFloor(seed, 1);
@@ -155,17 +256,19 @@ export function newRun(seed: number): RunState {
     shield: 0,
   };
   const lantern: Lantern = { charge: LANTERN_MAX, bright: false };
-  const revealed = reveal(floor, hero, sightRadius(lantern));
+  const seen = look(floor, hero, lantern, [], []);
   return {
     seed,
     turn: 0,
     depth: 1,
-    floors: [revealed],
+    floors: [seen.floor],
     hero,
     lantern,
+    equipment: { weapon: STARTING_WEAPON, armor: STARTING_ARMOR },
+    pack: emptyPack(),
     rng: Rng.derive(seed, "play").state(),
     kills: 0,
-    discovered: spottedKinds(revealed, hero, lantern, []),
+    discovered: seen.discovered,
     status: "active",
     killedBy: null,
   };
@@ -186,6 +289,38 @@ export function visibleTiles(run: RunState): Set<number> {
   return computeVisible(currentFloor(run).tiles, run.hero, sightRadius(run.lantern));
 }
 
+/** The hero's attack power with their weapon (each blow adds 0–HERO_HIT_SPREAD). */
+export function attackPower(run: Pick<RunState, "hero" | "equipment">): number {
+  return heroAttackPower(run.hero.level, gearPower(run.equipment.weapon));
+}
+
+/** How much the hero's armor takes off each creature blow. */
+export function defensePower(run: Pick<RunState, "equipment">): number {
+  return heroDefense(gearPower(run.equipment.armor));
+}
+
+/** The least and most one of the hero's blows deals. */
+export function heroHitRange(run: Pick<RunState, "hero" | "equipment">): [number, number] {
+  const power = attackPower(run);
+  return [power, power + HERO_HIT_SPREAD];
+}
+
+/** The least and most one blow from this creature deals to the hero, after armor. */
+export function creatureHitRange(
+  monster: Pick<Monster, "attack">,
+  run: Pick<RunState, "equipment">,
+): [number, number] {
+  const defense = defensePower(run);
+  return [
+    creatureHit(monster.attack, defense, 0),
+    creatureHit(monster.attack, defense, CREATURE_HIT_SPREAD),
+  ];
+}
+
+function gearPower(id: GearId): number {
+  return (itemKind(id) as GearKind).power;
+}
+
 export function availableInteraction(run: RunState): Interaction | null {
   const floor = currentFloor(run);
   const kind = tileAt(floor.tiles, run.hero);
@@ -193,6 +328,8 @@ export function availableInteraction(run: RunState): Interaction | null {
     return { kind: "descend", toDepth: run.depth + 1 };
   if (kind === Tile.StairsUp && run.depth > 1) return { kind: "ascend", toDepth: run.depth - 1 };
   if (floor.camp && samePoint(floor.camp, run.hero) && !floor.campUsed) return { kind: "rest" };
+  const loot = floor.items.find((item) => samePoint(item, run.hero));
+  if (loot) return { kind: "pick-up", item: loot.item };
   return null;
 }
 
@@ -224,19 +361,29 @@ class Turn {
   private readonly floor: Floor;
   private readonly hero: Mutable<Hero>;
   private readonly lantern: Mutable<Lantern>;
+  private readonly equipment: Mutable<Equipment>;
+  private pack: Pack;
   private monsters: Mutable<Monster>[];
+  private items: readonly FloorItem[];
+  private traps: readonly Trap[];
+  private explored: readonly boolean[];
   private campUsed: boolean;
   private turnNumber: number;
   private kills: number;
   private status: RunState["status"];
-  private killedBy: CreatureId | null;
+  private killedBy: Cause | null;
 
   constructor(private readonly run: RunState) {
     this.rng = Rng.fromState(run.rng);
     this.floor = currentFloor(run);
     this.hero = { ...run.hero };
     this.lantern = { ...run.lantern };
+    this.equipment = { ...run.equipment };
+    this.pack = run.pack;
     this.monsters = this.floor.monsters.map((m) => ({ ...m }));
+    this.items = this.floor.items;
+    this.traps = this.floor.traps;
+    this.explored = this.floor.explored;
     this.campUsed = this.floor.campUsed;
     this.turnNumber = run.turn;
     this.kills = run.kills;
@@ -258,7 +405,17 @@ class Turn {
         return this.toggleLight();
       case "pulse":
         return this.pulse();
+      case "pick-up":
+        return this.pickUp(false);
+      case "use-item":
+        return this.handleItem(action.slot);
+      case "drop-item":
+        return this.dropItem(action.slot);
     }
+  }
+
+  private attackPower(): number {
+    return heroAttackPower(this.hero.level, gearPower(this.equipment.weapon));
   }
 
   private heroMoves(direction: Direction): boolean {
@@ -273,7 +430,7 @@ class Turn {
     const target = this.monsterAt(to);
     if (target) {
       // Moving into a creature attacks it.
-      const damage = heroAttackPower(this.hero.level) + this.rng.int(0, 2);
+      const damage = this.attackPower() + this.rng.int(0, HERO_HIT_SPREAD);
       this.events.push({
         type: "attacked",
         target: target.id,
@@ -288,6 +445,8 @@ class Turn {
     this.events.push({ type: "moved", from: { x: this.hero.x, y: this.hero.y }, to, direction });
     this.hero.x = to.x;
     this.hero.y = to.y;
+    this.springTrap();
+    if (this.status === "active") this.pickUp(true);
     return true;
   }
 
@@ -327,7 +486,7 @@ class Turn {
     }
     this.lantern.charge -= PULSE_COST;
     this.hero.shield += PULSE_SHIELD;
-    const damage = heroAttackPower(this.hero.level) + PULSE_BONUS_DAMAGE;
+    const damage = this.attackPower() + PULSE_BONUS_DAMAGE;
     const targets = this.monsters.filter(
       (m) =>
         m.hp > 0 &&
@@ -339,8 +498,247 @@ class Turn {
       at: { x: this.hero.x, y: this.hero.y },
       hits: targets.length,
     });
-    for (const target of targets) this.damageMonster(target, damage);
+    for (const target of targets) this.damageMonster(target, damage, true);
     return true;
+  }
+
+  /** Picks up the item underfoot. `auto` is for stepping onto it, which stays quiet if there's none. */
+  private pickUp(auto: boolean): boolean {
+    const loot = this.items.find((item) => samePoint(item, this.hero));
+    if (!loot) {
+      if (!auto) this.events.push({ type: "nothing-here" });
+      return false;
+    }
+    const fromCache = loot.item === CACHE;
+    const item =
+      loot.item === CACHE ? cacheContents(this.run.seed, this.run.depth, loot) : loot.item;
+    const pack = packAdd(this.pack, item);
+    if (!pack) {
+      this.events.push({ type: "pack-full", item: loot.item });
+      return false;
+    }
+    this.pack = pack;
+    this.items = this.items.filter((i) => i !== loot);
+    this.events.push({
+      type: "picked-up",
+      loot: loot.id,
+      item,
+      at: { x: loot.x, y: loot.y },
+      fromCache,
+    });
+    return true;
+  }
+
+  private handleItem(slot: number): boolean {
+    const entry = this.pack[slot];
+    if (!entry) return false;
+    const kind = itemKind(entry.item);
+    return isSupply(kind) ? this.consumeSupply(slot, kind) : this.equip(slot, kind);
+  }
+
+  private consumeSupply(slot: number, kind: SupplyKind): boolean {
+    const item = kind.id as SupplyId;
+    const effect = kind.effect;
+    const hero = this.hero;
+    const used = (amount: number) => {
+      this.pack = packRemoveOne(this.pack, slot);
+      this.events.push({ type: "used", item, amount });
+      return true;
+    };
+    switch (effect.kind) {
+      case "heal": {
+        const missing = hero.maxHp - hero.hp;
+        if (missing === 0) return this.unneeded(item, "full-health");
+        const healed = Math.min(missing, effect.amount);
+        hero.hp += healed;
+        return used(healed);
+      }
+      case "charge": {
+        const missing = LANTERN_MAX - this.lantern.charge;
+        if (missing === 0) return this.unneeded(item, "full-charge");
+        const charged = Math.min(missing, effect.amount);
+        this.lantern.charge += charged;
+        return used(charged);
+      }
+      case "shield":
+        hero.shield += effect.amount;
+        return used(effect.amount);
+      case "vigor":
+        hero.maxHp += effect.amount;
+        hero.hp += effect.amount;
+        return used(effect.amount);
+      case "flare": {
+        const visible = computeVisible(this.floor.tiles, hero, sightRadius(this.lantern));
+        const targets = this.monsters.filter(
+          (m) => m.hp > 0 && chebyshevDistance(m, hero) <= effect.radius && visible.has(indexOf(m)),
+        );
+        if (targets.length === 0) return this.unneeded(item, "no-targets");
+        used(targets.length);
+        for (const target of targets) this.damageMonster(target, effect.damage, true);
+        return true;
+      }
+      case "survey": {
+        const hidden = this.traps.filter((t) => !t.found);
+        used(hidden.length);
+        this.explored = new Array<boolean>(MAP_SIZE).fill(true);
+        this.traps = this.traps.map((t) => (t.found ? t : { ...t, found: true }));
+        for (const trap of hidden) {
+          this.events.push({
+            type: "trap-found",
+            id: trap.id,
+            kind: trap.kind,
+            at: { x: trap.x, y: trap.y },
+          });
+        }
+        return true;
+      }
+      case "waystone": {
+        const from = { x: hero.x, y: hero.y };
+        const to = this.waystoneLanding();
+        used(0);
+        hero.x = to.x;
+        hero.y = to.y;
+        this.events.push({ type: "teleported", from, to });
+        return true;
+      }
+    }
+  }
+
+  private unneeded(item: SupplyId, reason: UnneededReason): false {
+    this.events.push({ type: "item-unneeded", item, reason });
+    return false;
+  }
+
+  /**
+   * A random open tile well away from every creature and from where the hero stands, never on an
+   * item, a trap or the camp. Failing that, the open tile farthest from any creature.
+   */
+  private waystoneLanding(): Point {
+    const tiles = this.floor.tiles;
+    const camp = this.floor.camp;
+    const living = this.monsters.filter((m) => m.hp > 0);
+    const candidates: Point[] = [];
+    for (let index = 0; index < MAP_SIZE; index++) {
+      if (tiles[index] !== Tile.Floor) continue;
+      const p = pointOf(index);
+      if (chebyshevDistance(p, this.hero) < WAYSTONE_MIN_JUMP) continue;
+      if (camp && samePoint(camp, p)) continue;
+      if (this.items.some((i) => samePoint(i, p)) || this.traps.some((t) => samePoint(t, p)))
+        continue;
+      if (living.some((m) => samePoint(m, p))) continue;
+      candidates.push(p);
+    }
+    if (candidates.length === 0) return { x: this.hero.x, y: this.hero.y };
+    const nearest = (p: Point) =>
+      Math.min(Number.POSITIVE_INFINITY, ...living.map((m) => chebyshevDistance(m, p)));
+    const safe = candidates.filter((p) => nearest(p) >= WAYSTONE_CLEARANCE);
+    if (safe.length > 0) return this.rng.pick(safe);
+    return candidates.reduce((best, p) => (nearest(p) > nearest(best) ? p : best));
+  }
+
+  /** Swaps the gear in `slot` with what's worn; the old piece goes into the pack. */
+  private equip(slot: number, kind: GearKind): boolean {
+    const item = kind.id as GearId;
+    const previous = this.equipment[kind.category];
+    if (item === previous) {
+      this.events.push({ type: "already-equipped", item });
+      return false;
+    }
+    const pack = packAdd(packRemoveOne(this.pack, slot), previous, slot);
+    if (!pack) {
+      this.events.push({ type: "pack-full", item: previous });
+      return false;
+    }
+    this.pack = pack;
+    if (kind.category === "weapon") this.equipment.weapon = item as WeaponId;
+    else this.equipment.armor = item as ArmorId;
+    this.events.push({ type: "equipped", item, slot: kind.category, previous });
+    return true;
+  }
+
+  private dropItem(slot: number): boolean {
+    const entry = this.pack[slot];
+    if (!entry) return false;
+    const camp = this.floor.camp;
+    const blocked =
+      tileAt(this.floor.tiles, this.hero) !== Tile.Floor ||
+      (camp !== null && samePoint(camp, this.hero)) ||
+      this.items.some((i) => samePoint(i, this.hero));
+    if (blocked) {
+      this.events.push({ type: "cannot-drop" });
+      return false;
+    }
+    this.pack = packRemoveOne(this.pack, slot);
+    // Turn numbers only grow, so this id is never reused on the floor.
+    const loot: FloorItem = {
+      id: `${this.run.depth}-d${this.turnNumber}`,
+      item: entry.item,
+      x: this.hero.x,
+      y: this.hero.y,
+    };
+    this.items = [...this.items, loot];
+    this.events.push({
+      type: "dropped",
+      loot: loot.id,
+      item: entry.item,
+      at: { x: loot.x, y: loot.y },
+    });
+    return true;
+  }
+
+  /** Sets off a trap where the hero now stands, if there is one. */
+  private springTrap(): void {
+    const trap = this.traps.find((t) => samePoint(t, this.hero));
+    if (!trap) return;
+    this.traps = this.traps.filter((t) => t !== trap);
+    const hero = this.hero;
+    let damage = 0;
+    let absorbed = 0;
+    let drained = 0;
+    const woken: Mutable<Monster>[] = [];
+    switch (trap.kind) {
+      case "ember-vent":
+        // Fire finds the gaps in armor, so only a shield helps.
+        damage = trap.power;
+        absorbed = Math.min(hero.shield, damage);
+        hero.shield -= absorbed;
+        hero.hp = Math.max(0, hero.hp - (damage - absorbed));
+        break;
+      case "gloom-rune":
+        drained = Math.min(this.lantern.charge, trap.power);
+        this.lantern.charge -= drained;
+        break;
+      case "alarm-glyph":
+        for (const monster of this.monsters) {
+          if (monster.hp <= 0 || chebyshevDistance(monster, hero) > trap.power) continue;
+          if (!monster.alert) woken.push(monster);
+          monster.alert = true;
+          monster.lastSeen = { x: hero.x, y: hero.y };
+        }
+        break;
+    }
+    this.events.push({
+      type: "trap-sprung",
+      id: trap.id,
+      kind: trap.kind,
+      at: { x: trap.x, y: trap.y },
+      damage,
+      absorbed,
+      drained,
+      woke: woken.length,
+    });
+    for (const monster of woken) {
+      this.events.push({ type: "monster-noticed", id: monster.id, kind: monster.kind });
+    }
+    if (trap.kind === "gloom-rune" && this.lantern.bright) {
+      this.lantern.bright = false;
+      this.events.push({ type: "lantern", bright: false, reason: "doused" });
+    }
+    if (hero.hp === 0) {
+      this.status = "dead";
+      this.killedBy = trap.kind;
+      this.events.push({ type: "died", by: trap.kind });
+    }
   }
 
   burnLantern(): void {
@@ -353,7 +751,17 @@ class Turn {
     }
   }
 
-  private damageMonster(monster: Mutable<Monster>, damage: number): void {
+  /** `area` reports the damage separately, for hits that aren't the hero's own blows. */
+  private damageMonster(monster: Mutable<Monster>, damage: number, area = false): void {
+    if (area) {
+      this.events.push({
+        type: "monster-hurt",
+        id: monster.id,
+        kind: monster.kind,
+        at: { x: monster.x, y: monster.y },
+        damage,
+      });
+    }
     monster.hp -= damage;
     monster.alert = true;
     monster.lastSeen = { x: this.hero.x, y: this.hero.y };
@@ -456,7 +864,8 @@ class Turn {
   }
 
   private strike(monster: Mutable<Monster>): void {
-    const damage = Math.max(1, monster.attack + this.rng.int(0, 1) - heroDefense());
+    const defense = heroDefense(gearPower(this.equipment.armor));
+    const damage = creatureHit(monster.attack, defense, this.rng.int(0, CREATURE_HIT_SPREAD));
     const absorbed = Math.min(this.hero.shield, damage);
     this.hero.shield -= absorbed;
     this.hero.hp = Math.max(0, this.hero.hp - (damage - absorbed));
@@ -530,36 +939,47 @@ class Turn {
   }
 
   finish(): RunState {
-    const radius = sightRadius(this.lantern);
     const hero: Hero = { ...this.hero };
-    const floor = reveal(
-      { ...this.floor, monsters: this.monsters, campUsed: this.campUsed },
+    const seen = look(
+      {
+        ...this.floor,
+        monsters: this.monsters,
+        campUsed: this.campUsed,
+        items: this.items,
+        traps: this.traps,
+        explored: this.explored,
+      },
       hero,
-      radius,
+      this.lantern,
+      this.run.discovered,
+      this.events,
     );
-    const discovered = spottedKinds(floor, hero, this.lantern, this.run.discovered);
-    for (const kind of discovered.slice(this.run.discovered.length)) {
-      this.events.push({ type: "spotted", kind });
-    }
     return {
       ...this.run,
       turn: this.turnNumber,
       hero,
       lantern: { ...this.lantern },
-      floors: replaceFloor(this.run.floors, floor),
+      equipment: { ...this.equipment },
+      pack: this.pack,
+      floors: replaceFloor(this.run.floors, seen.floor),
       rng: this.rng.state(),
       kills: this.kills,
-      discovered,
+      discovered: seen.discovered,
       status: this.status,
       killedBy: this.killedBy,
     };
   }
 }
 
+/** What a supply cache holds: fixed per cache, so opening it later never changes the find. */
+function cacheContents(seed: number, depth: number, cache: FloorItem): SupplyId {
+  return pickSupply(Rng.derive(seed, "cache", cache.id), depth);
+}
+
 /** Taking the stairs: creatures don't get a turn, and the arrival floor is generated if new. */
 function takeStairs(run: RunState): ActionResult {
   const interaction = availableInteraction(run);
-  if (!interaction || interaction.kind === "rest") {
+  if (!interaction || (interaction.kind !== "descend" && interaction.kind !== "ascend")) {
     return { run, events: [{ type: "no-stairs" }], tookTurn: false };
   }
 
@@ -578,13 +998,18 @@ function takeStairs(run: RunState): ActionResult {
     lantern = { charge, bright: charge > 0 };
     if (charge === 0) events.push({ type: "lantern", bright: false, reason: "empty" });
   }
-  const revealed = reveal(target, hero, sightRadius(lantern));
-  const floors = existing ? replaceFloor(run.floors, revealed) : [...run.floors, revealed];
-  const discovered = spottedKinds(revealed, hero, lantern, run.discovered);
-  for (const kind of discovered.slice(run.discovered.length))
-    events.push({ type: "spotted", kind });
+  const seen = look(target, hero, lantern, run.discovered, events);
+  const floors = existing ? replaceFloor(run.floors, seen.floor) : [...run.floors, seen.floor];
   return {
-    run: { ...run, turn: run.turn + 1, depth: toDepth, hero, lantern, floors, discovered },
+    run: {
+      ...run,
+      turn: run.turn + 1,
+      depth: toDepth,
+      hero,
+      lantern,
+      floors,
+      discovered: seen.discovered,
+    },
     events,
     tookTurn: true,
   };
@@ -594,34 +1019,55 @@ function replaceFloor(floors: readonly Floor[], floor: Floor): Floor[] {
   return floors.map((f) => (f.depth === floor.depth ? floor : f));
 }
 
-/** Marks what the hero can see from `at` as explored. Returns the same floor if nothing is new. */
-function reveal(floor: Floor, at: Point, radius: number): Floor {
-  const visible = computeVisible(floor.tiles, at, radius);
-  let changed = false;
-  const explored = floor.explored.slice();
-  for (const index of visible) {
-    if (!explored[index]) {
-      explored[index] = true;
-      changed = true;
-    }
-  }
-  return changed ? { ...floor, explored } : floor;
-}
-
-/** `known` plus any new creature kinds now in view, in the order first seen. */
-function spottedKinds(
+/**
+ * What the hero takes in after an action: tiles now in view become explored, bright light shows
+ * nearby traps, and creature kinds seen for the first time join `known`. Reports finds in `events`.
+ * Returns the same floor object if nothing changed.
+ */
+function look(
   floor: Floor,
   hero: Point,
   lantern: Lantern,
   known: readonly CreatureId[],
-): CreatureId[] {
+  events: GameEvent[],
+): { floor: Floor; discovered: CreatureId[] } {
   const visible = computeVisible(floor.tiles, hero, sightRadius(lantern));
+  let seen = floor;
+
+  if ([...visible].some((index) => !floor.explored[index])) {
+    const explored = floor.explored.slice();
+    for (const index of visible) explored[index] = true;
+    seen = { ...seen, explored };
+  }
+
+  if (lantern.bright) {
+    const spotted = floor.traps.filter(
+      (t) => !t.found && chebyshevDistance(t, hero) <= TRAP_SPOT_RANGE && visible.has(indexOf(t)),
+    );
+    if (spotted.length > 0) {
+      seen = {
+        ...seen,
+        traps: floor.traps.map((t) => (spotted.includes(t) ? { ...t, found: true } : t)),
+      };
+      for (const trap of spotted) {
+        events.push({
+          type: "trap-found",
+          id: trap.id,
+          kind: trap.kind,
+          at: { x: trap.x, y: trap.y },
+        });
+      }
+    }
+  }
+
   const discovered = [...known];
   for (const monster of floor.monsters) {
-    if (visible.has(indexOf(monster)) && !discovered.includes(monster.kind))
+    if (visible.has(indexOf(monster)) && !discovered.includes(monster.kind)) {
       discovered.push(monster.kind);
+      events.push({ type: "spotted", kind: monster.kind });
+    }
   }
-  return discovered;
+  return { floor: seen, discovered };
 }
 
 /** Whether the hero has seen this tile on the current floor; used to limit click-to-walk routes. */
@@ -632,4 +1078,32 @@ export function isExplored(run: RunState, p: Point): boolean {
 /** The creature standing on a tile of the current floor, if any. */
 export function monsterAt(run: RunState, p: Point): Monster | undefined {
   return currentFloor(run).monsters.find((m) => samePoint(m, p));
+}
+
+/** The item lying on a tile of the current floor, if any. */
+export function itemAt(run: RunState, p: Point): FloorItem | undefined {
+  return currentFloor(run).items.find((item) => samePoint(item, p));
+}
+
+/** A trap the hero has found on a tile of the current floor. Hidden traps stay hidden. */
+export function knownTrapAt(run: RunState, p: Point): Trap | undefined {
+  return currentFloor(run).traps.find((t) => t.found && samePoint(t, p));
+}
+
+/**
+ * The route a click-to-walk takes: over explored ground, around creatures and known traps (unless
+ * one of them is the destination).
+ */
+export function walkRoute(floor: Floor, from: Point, to: Point): Direction[] | null {
+  const goal = indexOf(to);
+  const avoid = new Set([
+    ...floor.monsters.map((m) => indexOf(m)),
+    ...floor.traps.filter((t) => t.found).map((t) => indexOf(t)),
+  ]);
+  return findPath(
+    floor.tiles,
+    from,
+    to,
+    (index) => floor.explored[index] === true && (!avoid.has(index) || index === goal),
+  );
 }

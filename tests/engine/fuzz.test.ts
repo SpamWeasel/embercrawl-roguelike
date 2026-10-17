@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import { DIRECTIONS } from "../../src/engine/geometry";
 import { indexOf, isWalkable, tileAt } from "../../src/engine/map";
 import { Rng } from "../../src/engine/rng";
+import { PACK_SLOTS, STACK_LIMIT } from "../../src/engine/rules";
 import {
   type Action,
   applyAction,
@@ -12,15 +13,22 @@ import {
 } from "../../src/engine/run";
 import { newCharacter, parseCharacterSave, updateCharacter } from "../../src/engine/save";
 
-/** Mostly moves, with the occasional wait, lantern use, rest or trip down the stairs. */
+/**
+ * Mostly moves, with the occasional wait, lantern use, rest, trip down the stairs, item used or
+ * dropped, or pick-up.
+ */
 function randomAction(rng: Rng, run: RunState): Action {
   const interaction = availableInteraction(run);
-  if (interaction && interaction.kind !== "rest" && rng.chance(0.6)) return { type: "use-stairs" };
+  const stairs = interaction?.kind === "descend" || interaction?.kind === "ascend";
+  if (stairs && rng.chance(0.6)) return { type: "use-stairs" };
   if (interaction?.kind === "rest") return { type: "rest" };
+  if (interaction?.kind === "pick-up" && rng.chance(0.5)) return { type: "pick-up" };
   const roll = rng.float();
   if (roll < 0.05) return { type: "wait" };
   if (roll < 0.08) return { type: "toggle-light" };
   if (roll < 0.1) return { type: "pulse" };
+  if (roll < 0.16) return { type: "use-item", slot: rng.int(0, PACK_SLOTS - 1) };
+  if (roll < 0.17) return { type: "drop-item", slot: rng.int(0, PACK_SLOTS - 1) };
   return { type: "move", direction: rng.pick(DIRECTIONS) };
 }
 
@@ -33,6 +41,17 @@ function checkInvariants(run: RunState): void {
   expect(run.lantern.charge).toBeGreaterThanOrEqual(0);
   expect(run.lantern.charge).toBeLessThanOrEqual(100);
   expect(run.status === "dead").toBe(hero.hp === 0);
+  expect(run.pack).toHaveLength(PACK_SLOTS);
+  for (const entry of run.pack) {
+    if (entry) expect(entry.count).toBeGreaterThanOrEqual(1);
+    if (entry) expect(entry.count).toBeLessThanOrEqual(STACK_LIMIT);
+  }
+  const loot = new Set<number>();
+  for (const item of floor.items) {
+    expect(isWalkable(tileAt(floor.tiles, item))).toBe(true);
+    expect(loot.has(indexOf(item))).toBe(false);
+    loot.add(indexOf(item));
+  }
   const spots = new Set<number>([indexOf(hero)]);
   for (const monster of floor.monsters) {
     expect(monster.hp).toBeGreaterThan(0);
@@ -45,6 +64,7 @@ function checkInvariants(run: RunState): void {
 
 describe("random play", () => {
   it("never breaks the game's rules across many seeds", () => {
+    const seen = new Set<string>();
     for (let seed = 1; seed <= 24; seed++) {
       const rng = Rng.fromSeed(seed * 31);
       let run = newRun(seed);
@@ -52,6 +72,7 @@ describe("random play", () => {
         const result = applyAction(run, randomAction(rng, run));
         if (!result.tookTurn) expect(result.run).toBe(run);
         else expect(result.run.turn).toBe(run.turn + 1);
+        for (const event of result.events) seen.add(event.type);
         run = result.run;
         checkInvariants(run);
       }
@@ -68,5 +89,8 @@ describe("random play", () => {
       );
       expect(parseCharacterSave(JSON.parse(JSON.stringify(character)))).toEqual(character);
     }
+    // The random play really did reach the item rules. (It seldom leaves floor 1, so traps,
+    // which start on floor 2, are left to their own tests.)
+    for (const type of ["picked-up", "used", "dropped"]) expect(seen).toContain(type);
   });
 });
