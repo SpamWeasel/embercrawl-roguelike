@@ -25,7 +25,12 @@ improve:
 - Turns advance only on actions; attacks by moving into creatures; floors persist when revisited.
 - Lantern trade-off: bright light sees further but drains charge; charge powers a pulse.
 - Five creature behaviors (chase, slow, ranged, erratic, swift); consumables, weapons, armor,
-  traps, camps and shops; terrain palettes that change every three floors.
+  traps, camps and shops.
+- **Floor palettes (built in milestone 1):** floors 1–3 use the original palette (Ember Slate).
+  Each later group of three floors picks one of eight hand-designed palettes at random from the
+  run's seed, never repeating the group before (older ones may return). Floor 30 always uses the
+  exclusive Molten Heart palette. A run always gets the same sequence. Each palette has a region
+  name shown beside the floor number. Palettes are visual only and use their own random stream.
 - Achievements, bestiary and run history that survive death.
 - **Balance target:** a fixed, simple bot wins 25–35% of runs on seeds kept apart from tuning.
 
@@ -42,8 +47,10 @@ Lore is undecided: keep the buried observatory and beacon, or write a new story.
 - Pulses and other area effects include diagonal tiles. Sight and lantern radius are round
   (Euclidean distance); movement distance is Chebyshev (diagonals count as 1).
 - Controls: WASD or arrows for straight moves; Q/E/Z/C or two keys pressed together for
-  diagonals; numpad 1–9; click a tile to walk there (paths may use diagonals); gamepad left stick in
-  8 directions. All keys can be remapped.
+  diagonals; numpad 1–9; holding keys keeps walking; click a tile to walk there over explored
+  ground (paths may use diagonals; any key stops the walk); Space, `.` or numpad 5 waits; Enter,
+  `>` or `<` uses stairs (or click the stairs you stand on); Esc opens the menu. Gamepad left stick
+  in 8 directions and key remapping arrive in milestone 6.
 - Balance: diagonals remove corner-dancing escapes and strengthen swift creatures. The balance
   bot must use diagonals and the game is re-tuned to the 25–35% target.
 
@@ -137,7 +144,12 @@ Embercrawl.exe (Electron)
 - Saves live in `%APPDATA%\Embercrawl\Saves`. Documents was rejected because Windows' ransomware
   protection (Controlled Folder Access) can block games from writing there, and OneDrive can lock
   files mid-save.
+- Development builds save to `%APPDATA%\Embercrawl Dev\Saves` instead, so testing never touches a
+  player's real characters.
 - Uninstalling never deletes saves.
+- Built in milestone 1: one file per character, atomic writes, a save after every turn, and the
+  title screen's character list with "new character". Backups, checksums, delete, rename and
+  export/import follow in milestone 6.
 
 **Backing up and moving to another PC.**
 
@@ -155,12 +167,12 @@ Embercrawl.exe (Electron)
 
 | # | Milestone | Done when the player can… |
 |---|---|---|
-| 0 | Foundation: repository, `CLAUDE.md`, Electron + PixiJS + React skeleton, tests, x64/ARM64 installers | Install and launch Embercrawl |
-| 1 | Walkable dungeon: floor generation, 8-way movement and corner rule, fog, stairs, keyboard and mouse, save format with characters (first one created automatically), autosave | Walk floors, quit, and resume |
+| 0 ✅ | Foundation: repository, `CLAUDE.md`, Electron + PixiJS + React skeleton, tests, x64/ARM64 installers | Install and launch Embercrawl |
+| 1 ✅ | Walkable dungeon: floor generation, 8-way movement and corner rule, fog, stairs, keyboard and mouse, floor palettes every three floors, title screen with multiple characters (first one created automatically), autosave to disk | Walk floors, quit, and resume |
 | 2 | **Feel pass:** smooth motion, camera, lantern lighting, particles, input queuing, fullscreen and scaling | Judge the feel early |
 | 3 | Combat and creatures: behaviors adapted to 8-way, leveling, death | Fight |
 | 4 | Items and inventory, tooltips and comparisons | Gear up |
-| 5 | Full descent: 30 floors, guardians, palettes, shops, victory; bot re-tuned to 25–35% | Play a whole run |
+| 5 | Full descent: 30 floors of content, guardians, shops, victory; bot re-tuned to 25–35% | Play a whole run |
 | 6 | Characters, saves and settings: character select, export/import, backups, file association, key remapping, gamepad | Manage characters and move saves between PCs |
 | 7 | Art and audio pass | |
 | 8 | Release prep: signed installers, store page (itch.io or Steam), auto-update | Share it with players |

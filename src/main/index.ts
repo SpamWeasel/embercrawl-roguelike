@@ -1,10 +1,35 @@
+import { randomInt, randomUUID } from "node:crypto";
 import { writeFile } from "node:fs/promises";
 import { join } from "node:path";
-import { app, BrowserWindow, ipcMain, Menu, shell } from "electron";
-import { type AppInfo, IPC, type ReadyDetails } from "../shared/bridge";
+import { pathToFileURL } from "node:url";
+import {
+  app,
+  BrowserWindow,
+  type IpcMainEvent,
+  type IpcMainInvokeEvent,
+  ipcMain,
+  Menu,
+  shell,
+} from "electron";
+import { newCharacter } from "../engine/save";
+import { type AppInfo, IPC, type ReadyDetails, type Scene } from "../shared/bridge";
+import { SaveStore } from "./save-store";
 
 /** When set, the app renders once, saves a screenshot and report to this path, then quits. */
 const smokeScreenshotPath = process.env.EMBERCRAWL_SMOKE_SCREENSHOT;
+const smokeScene: Scene = process.env.EMBERCRAWL_SMOKE_SCENE === "game" ? "game" : "title";
+
+// Development builds keep their own saves, so testing never touches a player's real characters.
+// Tests can point the app at a throwaway folder instead.
+if (process.env.EMBERCRAWL_USER_DATA) app.setPath("userData", process.env.EMBERCRAWL_USER_DATA);
+else if (!app.isPackaged) app.setPath("userData", join(app.getPath("appData"), "Embercrawl Dev"));
+
+const devServerUrl = app.isPackaged ? undefined : process.env.ELECTRON_RENDERER_URL;
+const rendererFile = join(__dirname, "../renderer/index.html");
+/** Only pages starting with this address may use the save bridge. */
+const trustedPagePrefix = devServerUrl ?? pathToFileURL(rendererFile).href;
+
+const saves = new SaveStore(join(app.getPath("userData"), "Saves"));
 
 // One running copy at a time, so two windows can never write the same save files.
 if (!app.requestSingleInstanceLock()) {
@@ -17,25 +42,69 @@ if (!app.requestSingleInstanceLock()) {
     window.focus();
   });
   app.on("window-all-closed", () => app.quit());
+  // Finish any save still being written before the process exits.
+  let savesFlushed = false;
+  app.on("before-quit", (event) => {
+    if (savesFlushed) return;
+    event.preventDefault();
+    void saves.flush().finally(() => {
+      savesFlushed = true;
+      app.quit();
+    });
+  });
   void app.whenReady().then(start);
 }
 
 function start(): void {
   if (app.isPackaged) Menu.setApplicationMenu(null);
+  registerIpcHandlers();
+  const window = createMainWindow();
+  if (smokeScreenshotPath) runSmokeTest(window, smokeScreenshotPath);
+}
 
-  ipcMain.handle(
-    IPC.getAppInfo,
-    (): AppInfo => ({
+function registerIpcHandlers(): void {
+  ipcMain.handle(IPC.getAppInfo, (event): AppInfo => {
+    assertTrustedSender(event);
+    return {
       version: app.getVersion(),
       electron: process.versions.electron,
       chrome: process.versions.chrome,
       platform: process.platform,
       arch: process.arch,
-    }),
-  );
+    };
+  });
+  ipcMain.handle(IPC.listCharacters, (event) => {
+    assertTrustedSender(event);
+    return saves.list();
+  });
+  ipcMain.handle(IPC.loadCharacter, (event, id: unknown) => {
+    assertTrustedSender(event);
+    if (typeof id !== "string") throw new TypeError("A character id must be text.");
+    return saves.load(id);
+  });
+  ipcMain.handle(IPC.createCharacter, async (event, name: unknown) => {
+    assertTrustedSender(event);
+    if (typeof name !== "string") throw new TypeError("A character name must be text.");
+    const save = newCharacter({
+      id: randomUUID(),
+      name,
+      now: new Date().toISOString(),
+      seed: randomInt(0, 2 ** 32),
+    });
+    await saves.write(save);
+    return save;
+  });
+  ipcMain.handle(IPC.writeCharacter, (event, data: unknown) => {
+    assertTrustedSender(event);
+    return saves.write(data);
+  });
+}
 
-  const window = createMainWindow();
-  if (smokeScreenshotPath) runSmokeTest(window, smokeScreenshotPath);
+/** Rejects bridge calls from anything other than the game's own page. */
+function assertTrustedSender(event: IpcMainInvokeEvent | IpcMainEvent): void {
+  const url = event.senderFrame?.url ?? "";
+  if (!url.startsWith(trustedPagePrefix))
+    throw new Error("Blocked a request from an unexpected page.");
 }
 
 function createMainWindow(): BrowserWindow {
@@ -64,13 +133,14 @@ function createMainWindow(): BrowserWindow {
   });
   window.webContents.on("will-navigate", (event) => event.preventDefault());
 
-  const devServerUrl = process.env.ELECTRON_RENDERER_URL;
-  if (!app.isPackaged && devServerUrl) void window.loadURL(devServerUrl);
-  else void window.loadFile(join(__dirname, "../renderer/index.html"));
+  // Smoke tests can open straight into the game; normal launches show the title screen.
+  const hash = smokeScreenshotPath && smokeScene === "game" ? "scene=game" : undefined;
+  if (devServerUrl) void window.loadURL(hash ? `${devServerUrl}#${hash}` : devServerUrl);
+  else void window.loadFile(rendererFile, hash ? { hash } : {});
   return window;
 }
 
-/** Waits for the first rendered frames, then records a screenshot and any console errors. */
+/** Waits for the expected screen's first frames, then records a screenshot and any console errors. */
 function runSmokeTest(window: BrowserWindow, screenshotPath: string): void {
   const errors: string[] = [];
   let finished = false;
@@ -86,12 +156,14 @@ function runSmokeTest(window: BrowserWindow, screenshotPath: string): void {
       await writeFile(screenshotPath, image.toPNG());
       size = image.getSize();
     }
+    await saves.flush();
     const ok = !failure && errors.length === 0;
     const report = {
       ok,
       failure: failure ?? null,
       errors,
       renderer: details?.renderer ?? null,
+      scene: details?.scene ?? null,
       size,
     };
     await writeFile(`${screenshotPath}.json`, JSON.stringify(report, null, 2));
@@ -99,7 +171,7 @@ function runSmokeTest(window: BrowserWindow, screenshotPath: string): void {
   };
 
   timeout = setTimeout(
-    () => void finish(null, "The game window did not report ready within 20 seconds."),
+    () => void finish(null, `The ${smokeScene} screen did not report ready within 20 seconds.`),
     20_000,
   );
   window.webContents.on("console-message", (event) => {
@@ -108,8 +180,10 @@ function runSmokeTest(window: BrowserWindow, screenshotPath: string): void {
   window.webContents.on("render-process-gone", (_event, details) => {
     void finish(null, `The game window crashed: ${details.reason}`);
   });
-  ipcMain.once(IPC.rendererReady, (_event, details: ReadyDetails) => {
-    // Let a few frames of animation draw before capturing.
+  ipcMain.on(IPC.rendererReady, (event, details: ReadyDetails) => {
+    assertTrustedSender(event);
+    if (details?.scene !== smokeScene) return;
+    // Let a few frames draw before capturing.
     setTimeout(() => void finish(details), 750);
   });
 }

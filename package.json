@@ -1,13 +1,13 @@
 {
   "name": "embercrawl",
   "productName": "Embercrawl",
-  "version": "0.0.1",
+  "version": "0.1.0",
   "description": "An original turn-based roguelike for the desktop.",
   "private": true,
   "main": "./out/main/index.js",
   "scripts": {
     "dev": "electron-vite dev",
-    "dev:web": "electron-vite dev --rendererOnly",
+    "dev:web": "vite --config vite.web.config.mts",
     "build": "electron-vite build",
     "start": "electron-vite preview",
     "typecheck": "tsc -p tsconfig.engine.json && tsc -p tsconfig.node.json && tsc -p tsconfig.web.json",
@@ -32,8 +32,10 @@
     "react": "^19.3.1",
     "react-dom": "^19.3.1",
     "tailwindcss": "^4.3.3",
+    "tsx": "^4.23.15",
     "typescript": "^7.0.2",
     "vite": "^8.3.4",
-    "vitest": "^5.0.5"
+    "vitest": "^5.0.5",
+    "zod": "^4.6.7"
   }
 }

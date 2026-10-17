@@ -1,0 +1,128 @@
+import { Texture } from "pixi.js";
+import heroUrl from "../../assets/sprites/hero.png";
+import stairsDownUrl from "../../assets/sprites/stairs-down.png";
+import stairsUpUrl from "../../assets/sprites/stairs-up.png";
+import type { FloorPalette } from "./palettes";
+
+/** Generated tiles are tiny pixel art, scaled up by whole numbers so they stay crisp. */
+export const TILE_PIXELS = 16;
+
+export interface SpriteTextures {
+  readonly hero: Texture;
+  readonly stairsDown: Texture;
+  readonly stairsUp: Texture;
+  destroy(): void;
+}
+
+/** Floor and wall tiles in one palette, with a few variants of each for texture. */
+export interface TileTextures {
+  readonly floors: readonly Texture[];
+  readonly walls: readonly Texture[];
+  destroy(): void;
+}
+
+export async function loadSpriteTextures(): Promise<SpriteTextures> {
+  const [hero, stairsDown, stairsUp] = (await Promise.all(
+    [heroUrl, stairsDownUrl, stairsUpUrl].map(loadImageTexture),
+  )) as [Texture, Texture, Texture];
+  return {
+    hero,
+    stairsDown,
+    stairsUp,
+    destroy: () => {
+      for (const texture of [hero, stairsDown, stairsUp]) texture.destroy(true);
+    },
+  };
+}
+
+/** Draws placeholder stone and brick tiles in a palette's colors, until real tile art arrives. */
+export function createTileTextures(palette: FloorPalette): TileTextures {
+  const floors = [1, 2, 3, 4].map((variant) =>
+    pixelTexture(variant, (paint, random) => drawFloor(paint, random, palette.floor)),
+  );
+  const walls = [11, 12, 13].map((variant) =>
+    pixelTexture(variant, (paint, random) => drawWall(paint, random, palette.wall)),
+  );
+  return {
+    floors,
+    walls,
+    destroy: () => {
+      for (const texture of [...floors, ...walls]) texture.destroy(true);
+    },
+  };
+}
+
+/**
+ * Loads an image through an <img> element rather than fetch(), which the packaged app's file://
+ * pages don't support.
+ */
+async function loadImageTexture(url: string): Promise<Texture> {
+  const image = new Image();
+  image.src = url;
+  await image.decode();
+  const texture = Texture.from(image);
+  texture.source.scaleMode = "linear";
+  return texture;
+}
+
+type Paint = (x: number, y: number, color: string) => void;
+
+function pixelTexture(
+  seed: number,
+  painter: (paint: Paint, random: () => number) => void,
+): Texture {
+  const canvas = document.createElement("canvas");
+  canvas.width = TILE_PIXELS;
+  canvas.height = TILE_PIXELS;
+  const context = canvas.getContext("2d");
+  if (!context) throw new Error("This system could not create a 2D canvas.");
+  const paint: Paint = (x, y, color) => {
+    context.fillStyle = color;
+    context.fillRect(x, y, 1, 1);
+  };
+  painter(paint, cosmeticRandom(seed));
+  const texture = Texture.from(canvas);
+  texture.source.scaleMode = "nearest";
+  return texture;
+}
+
+/** Staggered flagstones with a little speckle. */
+function drawFloor(paint: Paint, random: () => number, colors: FloorPalette["floor"]): void {
+  for (let y = 0; y < TILE_PIXELS; y++) {
+    for (let x = 0; x < TILE_PIXELS; x++) {
+      const groutRow = y === 7 || y === 15;
+      const groutColumn = y < 7 ? x === 7 || x === 15 : x === 3 || x === 11;
+      if (groutRow || groutColumn) {
+        paint(x, y, colors.grout);
+        continue;
+      }
+      const roll = random();
+      if (colors.glint && roll < 0.025) paint(x, y, colors.glint);
+      else if (roll < 0.1) paint(x, y, colors.light);
+      else if (roll < 0.18) paint(x, y, colors.dark);
+      else paint(x, y, colors.base);
+    }
+  }
+}
+
+/** Brick courses with a lit top edge on each brick. */
+function drawWall(paint: Paint, random: () => number, colors: FloorPalette["wall"]): void {
+  for (let y = 0; y < TILE_PIXELS; y++) {
+    const offset = Math.floor(y / 4) % 2 === 0 ? 7 : 3;
+    for (let x = 0; x < TILE_PIXELS; x++) {
+      const mortar = y % 4 === 3 || (x - offset + TILE_PIXELS) % 8 === 0;
+      if (mortar) paint(x, y, colors.mortar);
+      else if (y % 4 === 0) paint(x, y, colors.light);
+      else paint(x, y, random() < 0.12 ? colors.dark : colors.base);
+    }
+  }
+}
+
+/** Repeatable speckles, so the same tile variant always looks the same. Not used for game rules. */
+function cosmeticRandom(seed: number): () => number {
+  let state = seed * 2654435761;
+  return () => {
+    state = (Math.imul(state, 1664525) + 1013904223) >>> 0;
+    return state / 0x1_0000_0000;
+  };
+}

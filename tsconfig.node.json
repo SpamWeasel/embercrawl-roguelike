@@ -1,4 +1,4 @@
-﻿{
+{
   // Electron main process, preload, shared types, tests and tool configs.
   "extends": "./tsconfig.base.json",
   "compilerOptions": {
@@ -11,7 +11,9 @@
     "src/shared",
     "src/engine",
     "tests",
+    "scripts",
     "*.config.ts",
-    "*.config.mts"
+    "*.config.mts",
+    "vite.renderer.ts"
   ]
 }

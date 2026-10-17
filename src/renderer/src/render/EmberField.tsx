@@ -1,16 +1,17 @@
 import { useEffect, useRef } from "react";
-import type { ReadyDetails } from "../../../shared/bridge";
 import { createEmberScene, type EmberScene } from "./emberScene";
 
 interface EmberFieldProps {
   className?: string;
-  /** Called once the scene has started rendering. */
-  onReady?: (details: ReadyDetails) => void;
+  /** Called once the scene has started rendering, with the PixiJS renderer's name. */
+  onReady?: (rendererName: string) => void;
 }
 
-/** Hosts the PixiJS canvas and tears it down cleanly when React unmounts it. */
+/** Hosts the drifting-ember PixiJS background and tears it down cleanly when React unmounts it. */
 export function EmberField({ className, onReady }: EmberFieldProps) {
   const hostRef = useRef<HTMLDivElement>(null);
+  const onReadyRef = useRef(onReady);
+  onReadyRef.current = onReady;
 
   useEffect(() => {
     const host = hostRef.current;
@@ -27,7 +28,7 @@ export function EmberField({ className, onReady }: EmberFieldProps) {
           return;
         }
         scene = created;
-        onReady?.({ renderer: created.renderer });
+        onReadyRef.current?.(created.renderer);
       })
       .catch((error: unknown) => {
         console.error("The renderer could not start.", error);
@@ -37,7 +38,7 @@ export function EmberField({ className, onReady }: EmberFieldProps) {
       disposed = true;
       scene?.destroy();
     };
-  }, [onReady]);
+  }, []);
 
   return <div ref={hostRef} className={className} aria-hidden="true" />;
 }
