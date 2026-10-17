@@ -109,6 +109,21 @@ Embercrawl.exe (Electron)
 - Single-image sprites are brought to life in code: idle breathing, squash and stretch, attack
   leans and hit flashes. Frame-based animation can be added if animated art is made.
 - Floor palettes with a descent transition. Crisp scaling from 720p to 4K.
+- **Built in milestone 2:**
+  - Steps glide (about 115 ms each). Rapid input queues up and plays faster to catch up; nothing
+    is dropped and the rules never wait for animation.
+  - The camera eases after the hero, and there's a light shake on wall bumps.
+  - Lantern light follows the hero's drawn position with a soft warm halo masked to visible tiles
+    and a gentle flicker. Tiles fade in and out of sight and fade in when first discovered.
+  - The hero has a shadow, a walking hop, a landing squash, idle breathing, a turn animation and a
+    wall-bump nudge.
+  - Particles: footstep dust, drifting lantern motes, and an ember burst on arrival.
+  - Floor changes fade through black with the hero sinking into the stairs, then a "Floor N ·
+    Region" banner.
+  - Pixel-perfect scaling on any DPI; F11 or Alt+Enter for fullscreen; 30 fps when idle; reduced
+    motion honored.
+  - Hit sparks, death dissolves, damage numbers, the pulse shockwave, attack leans and hit flashes
+    arrive with combat in milestone 3.
 - **Art workflow:** drop images named after their entity into `art/incoming/`. A script removes
   flat backgrounds (black, white or mixed), trims, squares and saves them; the game picks sprites up
   automatically by file name. Missing art gets a generated placeholder.
@@ -169,8 +184,8 @@ Embercrawl.exe (Electron)
 |---|---|---|
 | 0 ✅ | Foundation: repository, `CLAUDE.md`, Electron + PixiJS + React skeleton, tests, x64/ARM64 installers | Install and launch Embercrawl |
 | 1 ✅ | Walkable dungeon: floor generation, 8-way movement and corner rule, fog, stairs, keyboard and mouse, floor palettes every three floors, title screen with multiple characters (first one created automatically), autosave to disk | Walk floors, quit, and resume |
-| 2 | **Feel pass:** smooth motion, camera, lantern lighting, particles, input queuing, fullscreen and scaling | Judge the feel early |
-| 3 | Combat and creatures: behaviors adapted to 8-way, leveling, death | Fight |
+| 2 ✅ | **Feel pass:** smooth motion, camera, lantern lighting, particles, input queuing, fullscreen and scaling | Judge the feel early |
+| 3 | Combat and creatures: behaviors adapted to 8-way, leveling, death, combat effects (sparks, damage numbers, dissolves, pulse shockwave) | Fight |
 | 4 | Items and inventory, tooltips and comparisons | Gear up |
 | 5 | Full descent: 30 floors of content, guardians, shops, victory; bot re-tuned to 25–35% | Play a whole run |
 | 6 | Characters, saves and settings: character select, export/import, backups, file association, key remapping, gamepad | Manage characters and move saves between PCs |

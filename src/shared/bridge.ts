@@ -12,6 +12,7 @@ export const IPC = {
   loadCharacter: "saves:load",
   createCharacter: "saves:create",
   writeCharacter: "saves:write",
+  toggleFullscreen: "window:toggle-fullscreen",
 } as const;
 
 export interface AppInfo {
@@ -48,5 +49,7 @@ export interface SaveBridge {
 export interface EmbercrawlBridge {
   getAppInfo(): Promise<AppInfo>;
   signalReady(details: ReadyDetails): void;
+  /** Switches the game window in or out of fullscreen; resolves to the new state. */
+  toggleFullscreen(): Promise<boolean>;
   saves: SaveBridge;
 }

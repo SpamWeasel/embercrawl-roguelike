@@ -5,9 +5,7 @@ import { type Action, type ActionResult, applyAction, currentFloor } from "../..
 import { type CharacterSave, updateCharacter } from "../../../engine/save";
 import type { SaveBridge } from "../../../shared/bridge";
 import { readableError } from "../saves/saveService";
-
-/** Time between steps when walking to a clicked tile. */
-const AUTO_WALK_STEP_MS = 95;
+import { AUTO_WALK_STEP_MS } from "./timing";
 
 export interface CharacterSession {
   readonly character: CharacterSave;
@@ -18,8 +16,15 @@ export interface CharacterSession {
   cancelWalk(): void;
   /** Resolves once the latest save has been written. */
   flush(): Promise<void>;
+  /**
+   * Calls `listener` with the result of every action as it happens (including bumps into walls),
+   * before React re-renders, so the view can animate each step. Returns an unsubscribe function.
+   */
+  subscribe(listener: ActionListener): () => void;
   readonly saveError: string | null;
 }
+
+export type ActionListener = (result: ActionResult) => void;
 
 /** Owns one character while it is being played: applies actions, autosaves, and tracks play time. */
 export function useCharacterSession(initial: CharacterSave, saves: SaveBridge): CharacterSession {
@@ -29,12 +34,21 @@ export function useCharacterSession(initial: CharacterSave, saves: SaveBridge): 
   const lastWrite = useRef<Promise<void>>(Promise.resolve());
   const sessionStart = useRef(performance.now());
   const walkTimer = useRef<ReturnType<typeof setInterval> | undefined>(undefined);
+  const listeners = useRef(new Set<ActionListener>());
+
+  const subscribe = useCallback((listener: ActionListener) => {
+    listeners.current.add(listener);
+    return () => {
+      listeners.current.delete(listener);
+    };
+  }, []);
 
   const play = useCallback(
     (action: Action): ActionResult | null => {
       const save = current.current;
       if (!save.run) return null;
       const result = applyAction(save.run, action);
+      for (const listener of listeners.current) listener(result);
       if (!result.tookTurn) return result;
       const next = updateCharacter(save, result.run, {
         now: new Date().toISOString(),
@@ -92,5 +106,5 @@ export function useCharacterSession(initial: CharacterSave, saves: SaveBridge): 
 
   const flush = useCallback(() => lastWrite.current, []);
 
-  return { character, act, walkTo, cancelWalk, flush, saveError };
+  return { character, act, walkTo, cancelWalk, flush, subscribe, saveError };
 }

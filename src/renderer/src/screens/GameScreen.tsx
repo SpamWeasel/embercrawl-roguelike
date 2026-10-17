@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { type Point, samePoint } from "../../../engine/geometry";
 import { FLOOR_COUNT } from "../../../engine/map";
 import {
@@ -10,6 +10,7 @@ import {
 } from "../../../engine/run";
 import type { CharacterSave } from "../../../engine/save";
 import type { ReadyDetails, SaveBridge } from "../../../shared/bridge";
+import { toggleFullscreen } from "../fullscreen";
 import { useCharacterSession } from "../game/useCharacterSession";
 import { useGameKeys } from "../input/useGameKeys";
 import { DungeonCanvas } from "../render/dungeon/DungeonCanvas";
@@ -25,18 +26,15 @@ interface GameScreenProps {
   onReady(details: ReadyDetails): void;
 }
 
-function describe(events: readonly GameEvent[], seed: number): string | null {
+/** The big title shown when arriving on a floor. `key` restarts its animation. */
+interface Banner {
+  readonly key: number;
+  readonly floor: number;
+  readonly region: string;
+}
+
+function describe(events: readonly GameEvent[]): string | null {
   for (const event of events) {
-    if (event.type === "changed-floor") {
-      const travel =
-        event.to > event.from
-          ? `You descend to floor ${event.to}.`
-          : `You climb back up to floor ${event.to}.`;
-      const region = paletteForFloor(seed, event.to);
-      return region === paletteForFloor(seed, event.from)
-        ? travel
-        : `${travel} You enter ${region.name}.`;
-    }
     if (event.type === "no-stairs") return "There are no stairs here.";
   }
   return null;
@@ -44,11 +42,21 @@ function describe(events: readonly GameEvent[], seed: number): string | null {
 
 export function GameScreen({ initial, saves, onExit, onReady }: GameScreenProps) {
   const session = useCharacterSession(initial, saves);
-  const { character, act, walkTo, cancelWalk, flush } = session;
+  const { character, act, walkTo, cancelWalk, flush, subscribe } = session;
   const run = character.run;
   const [menuOpen, setMenuOpen] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
   const [leaving, setLeaving] = useState(false);
+  const bannerCount = useRef(0);
+  const [banner, setBanner] = useState<Banner | null>(() =>
+    initial.run
+      ? {
+          key: 0,
+          floor: initial.run.depth,
+          region: paletteForFloor(initial.run.seed, initial.run.depth).name,
+        }
+      : null,
+  );
 
   const model = useMemo(
     () =>
@@ -73,8 +81,18 @@ export function GameScreen({ initial, saves, onExit, onReady }: GameScreenProps)
   const perform = useCallback(
     (action: Action) => {
       const result = act(action);
-      const text = result && describe(result.events, result.run.seed);
+      if (!result) return;
+      const text = describe(result.events);
       if (text) setMessage(text);
+      const arrival = result.events.find((event) => event.type === "changed-floor");
+      if (arrival) {
+        bannerCount.current += 1;
+        setBanner({
+          key: bannerCount.current,
+          floor: arrival.to,
+          region: paletteForFloor(result.run.seed, arrival.to).name,
+        });
+      }
     },
     [act],
   );
@@ -128,9 +146,19 @@ export function GameScreen({ initial, saves, onExit, onReady }: GameScreenProps)
       <DungeonCanvas
         className="absolute inset-0"
         model={model}
+        subscribe={subscribe}
         onTileClick={onTileClick}
         onReady={(renderer) => onReady({ renderer, scene: "game" })}
       />
+
+      {banner && (
+        <div key={banner.key} className="floor-banner" onAnimationEnd={() => setBanner(null)}>
+          <p className="title-ember font-display text-5xl font-bold tracking-[0.06em]">
+            Floor {banner.floor}
+          </p>
+          <p className="text-sm uppercase tracking-[0.45em] text-bone/75">{banner.region}</p>
+        </div>
+      )}
 
       <header className="hud-bar hud-top">
         <div className="flex items-baseline gap-3">
@@ -224,6 +252,9 @@ function PauseMenu({
         {/* biome-ignore lint/a11y/noAutofocus: the menu should take keyboard focus as it opens. */}
         <button type="button" className="btn btn-primary" onClick={onResume} autoFocus>
           Resume
+        </button>
+        <button type="button" className="btn" onClick={() => void toggleFullscreen()}>
+          Fullscreen <kbd className="kbd">F11</kbd>
         </button>
         <button type="button" className="btn" onClick={onExit} disabled={leaving}>
           {leaving ? "Saving…" : "Save and return to title"}

@@ -33,6 +33,32 @@ body {
   background: radial-gradient(ellipse at center, transparent 45%, rgb(0 0 0 / 0.65) 100%);
 }
 
+@keyframes floor-banner {
+  0% {
+    opacity: 0;
+    transform: translateY(8px);
+    filter: blur(2px);
+  }
+  18% {
+    opacity: 1;
+    transform: none;
+    filter: none;
+  }
+  72% {
+    opacity: 1;
+  }
+  100% {
+    opacity: 0;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .floor-banner {
+    /* Unlayered, so this already beats the component style below without !important. */
+    animation-duration: 1.6s;
+  }
+}
+
 @layer components {
   .panel {
     @apply rounded-lg border border-white/10 bg-ash/85 shadow-2xl shadow-black/60 backdrop-blur-sm;
@@ -81,6 +107,12 @@ body {
 
   .hud-bar :is(button, a) {
     @apply pointer-events-auto;
+  }
+
+  /** "Floor 4 · Rimefrost", shown for a moment on arrival. */
+  .floor-banner {
+    @apply pointer-events-none absolute inset-x-0 top-[24%] z-10 flex flex-col items-center gap-1 text-center;
+    animation: floor-banner 2.4s ease-out 0.12s both;
   }
 
   .save-warning {

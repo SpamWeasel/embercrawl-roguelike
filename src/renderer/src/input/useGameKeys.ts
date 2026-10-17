@@ -1,5 +1,9 @@
 import { useEffect, useRef } from "react";
 import { type Direction, directionFromDelta } from "../../../engine/geometry";
+import {
+  KEY_REPEAT_DELAY_MS as REPEAT_DELAY_MS,
+  KEY_REPEAT_INTERVAL_MS as REPEAT_INTERVAL_MS,
+} from "../game/timing";
 
 export interface GameKeyHandlers {
   move(direction: Direction): void;
@@ -41,9 +45,6 @@ const INTERACT_KEYS = new Set(["Enter", "NumpadEnter"]);
 
 /** Two direction keys pressed within this window count as one diagonal. */
 const CHORD_MS = 45;
-/** Holding a key keeps walking: first repeat after this delay, then at the interval. */
-const REPEAT_DELAY_MS = 220;
-const REPEAT_INTERVAL_MS = 130;
 
 /**
  * Keyboard controls for the dungeon. WASD/arrows combine (W+D walks north-east), Q/E/Z/C and the

@@ -22,6 +22,11 @@ The owner is new to development tooling. Explain setup steps and trade-offs plai
   its own palette used nowhere else. See `src/renderer/src/render/dungeon/palettes.ts` and its tests.
 - **8-way movement:** a diagonal step is blocked only when both side tiles are walls; line of sight
   follows the same rule and is symmetric. Hero and monsters share these rules (`canStep`).
+- **Animation never delays rules:** actions apply instantly in the engine. The session sends each
+  `ActionResult` to the view (`subscribe` → `DungeonView.handleEvents`), which animates it; the
+  view then receives the new state via `render`. Input is never blocked waiting for animation;
+  the view's `StepQueue` speeds up to catch up. Walking pace lives in `game/timing.ts`.
+- Every animation must respect `prefers-reduced-motion` (no bob, shake, particles; shorter steps).
 - **Saves must never break:** every save-format change bumps the format version, adds an upgrade
   step and adds a test that loads the previous format.
 - **Golden RNG values** in `tests/engine/rng.test.ts` change every dungeon from every seed. Only
@@ -65,6 +70,11 @@ The owner is new to development tooling. Explain setup steps and trade-offs plai
   `/@fs/C:/Users/phred/Desktop/Embercrawl/src/engine/index.ts`. Use a throwaway character, never
   the owner's.
 - Background browser tabs throttle timers; front the tab before timing-sensitive tests.
+- To check animation, reach the live `DungeonView` through the React fiber of the canvas host
+  (its `DungeonCanvas` hooks hold `viewRef`) and sample `view.display`, `view.steps`,
+  `view.transition` and `view.app.ticker.maxFPS` once per `requestAnimationFrame`.
+- F11 and Alt+Enter are caught in the main process (`before-input-event`), so they can't be tested
+  from the page.
 - After file changes, a long-running Vite dev server can serve stale modules on Windows; restart it
   if behavior doesn't match the code.
 
@@ -90,7 +100,10 @@ The owner is new to development tooling. Explain setup steps and trade-offs plai
 - `src/main` — Electron main process: window, save store (`save-store.ts`), smoke-test mode
 - `src/preload` — exposes `window.embercrawl`
 - `src/shared` — types shared across processes (`bridge.ts`)
-- `src/renderer/src` — React UI: `screens/`, `game/` (session, autosave, click-to-walk), `input/`
-  (keyboard), `saves/` (desktop or browser storage), `render/` (PixiJS; `dungeon/` holds the floor
-  view, textures and palettes), `assets/sprites/` (the owner's art)
+- `src/renderer/src` — React UI: `screens/`, `game/` (session, autosave, click-to-walk, timing),
+  `input/` (keyboard), `saves/` (desktop or browser storage), `render/` (PixiJS), `assets/sprites/`
+  (the owner's art)
+- `src/renderer/src/render/dungeon` — `DungeonView` (scene, frame loop, camera, light, transitions),
+  `HeroRig` (hero animation), `particles`, `textures`, `palettes`, and the pure, tested helpers
+  `motion` (step queue, easing), `camera` (offsets, crisp scale) and `lighting` (falloff, flicker)
 - `tests/` — Vitest; `scripts/` — tooling; `build/` — installer resources; `docs/` — plan

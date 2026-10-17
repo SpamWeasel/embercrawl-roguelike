@@ -98,6 +98,17 @@ function registerIpcHandlers(): void {
     assertTrustedSender(event);
     return saves.write(data);
   });
+  ipcMain.handle(IPC.toggleFullscreen, (event) => {
+    assertTrustedSender(event);
+    const window = BrowserWindow.fromWebContents(event.sender);
+    return window ? toggleFullscreen(window) : false;
+  });
+}
+
+function toggleFullscreen(window: BrowserWindow): boolean {
+  const next = !window.isFullScreen();
+  window.setFullScreen(next);
+  return next;
 }
 
 /** Rejects bridge calls from anything other than the game's own page. */
@@ -132,6 +143,15 @@ function createMainWindow(): BrowserWindow {
     return { action: "deny" };
   });
   window.webContents.on("will-navigate", (event) => event.preventDefault());
+
+  // F11 and Alt+Enter toggle fullscreen on every screen. Handled here, before the page or the
+  // development menu sees the key, so it can't fire twice.
+  window.webContents.on("before-input-event", (event, input) => {
+    const fullscreenKey = input.key === "F11" || (input.alt && input.key === "Enter");
+    if (input.type !== "keyDown" || !fullscreenKey || input.isAutoRepeat) return;
+    event.preventDefault();
+    toggleFullscreen(window);
+  });
 
   // Smoke tests can open straight into the game; normal launches show the title screen.
   const hash = smokeScreenshotPath && smokeScene === "game" ? "scene=game" : undefined;
