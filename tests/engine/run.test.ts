@@ -10,15 +10,15 @@ import {
   type RunState,
   visibleTiles,
 } from "../../src/engine/run";
-import { deepFreeze } from "./helpers";
+import { deepFreeze, withoutCreatures } from "./helpers";
 
-/** Walks the hero to a tile on the current floor by repeated move actions. */
+/** Walks the hero to a tile on the current floor by repeated move actions, with no creatures about. */
 function walkTo(run: RunState, target: { x: number; y: number }): RunState {
   const route = findPath(currentFloor(run).tiles, run.hero, target);
   if (!route) throw new Error("No route in test.");
   return route.reduce(
     (state, direction) => applyAction(state, { type: "move", direction }).run,
-    run,
+    withoutCreatures(run),
   );
 }
 

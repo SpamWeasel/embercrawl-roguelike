@@ -1,7 +1,15 @@
-import type { Point } from "./geometry";
-import { FLOOR_COUNT, indexOf, MAP_SIZE, Tile, type TileKind } from "./map";
+import { CREATURES, type CreatureKind, type Monster } from "./creatures";
+import { type Point, samePoint } from "./geometry";
+import { FLOOR_COUNT, indexOf, MAP_SIZE, pointOf, Tile, type TileKind } from "./map";
 import { stepDistances } from "./path";
 import { Rng } from "./rng";
+import {
+  CREATURE_LIFESPAN,
+  creatureCount,
+  NEW_CREATURE_WINDOW,
+  SPAWN_CLEARANCE,
+  scaledStats,
+} from "./rules";
 
 export interface Floor {
   readonly depth: number;
@@ -14,7 +22,16 @@ export interface Floor {
   readonly downStairs: Point | null;
   /** Where the hero appears when arriving from above: the start tile on floor 1, else the up stairs. */
   readonly entrance: Point;
+  /** A warded resting place: creatures can't enter it or strike someone on it. */
+  readonly camp: Point | null;
+  /** Each camp can be rested at once. */
+  readonly campUsed: boolean;
+  /** Living creatures on this floor. */
+  readonly monsters: readonly Monster[];
 }
+
+/** The camp sits between this share and the next of the farthest walking distance from the entrance. */
+const CAMP_DISTANCE_SHARE = [0.3, 0.7] as const;
 
 /** The map is a 4 × 2 grid of 8 × 8 cells; each holds a room or a corridor junction. */
 const CELL_COLUMNS = 4;
@@ -63,6 +80,14 @@ export function generateFloor(seed: number, depth: number): Floor {
   if (upStairs) tiles[indexOf(upStairs)] = Tile.StairsUp;
   if (downStairs) tiles[indexOf(downStairs)] = Tile.StairsDown;
 
+  // Everything below draws from the stream after the layout, so adding or changing it never
+  // changes a floor's shape.
+  const distances = stepDistances(tiles, entrance);
+  const reserved: Point[] = [entrance, ...(downStairs ? [downStairs] : [])];
+  const camp = pickCamp(rng, distances, roomTiles, reserved);
+  if (camp) reserved.push(camp);
+  const monsters = spawnCreatures(rng, depth, tiles, distances, reserved);
+
   return {
     depth,
     tiles,
@@ -70,7 +95,98 @@ export function generateFloor(seed: number, depth: number): Floor {
     upStairs,
     downStairs,
     entrance,
+    camp,
+    campUsed: false,
+    monsters,
   };
+}
+
+/** A room tile roughly midway through the floor, so a rest comes partway down. */
+function pickCamp(
+  rng: Rng,
+  distances: readonly number[],
+  roomTiles: readonly Point[],
+  reserved: readonly Point[],
+): Point | null {
+  const free = roomTiles.filter((p) => !reserved.some((r) => samePoint(r, p)));
+  const farthest = Math.max(...free.map((p) => distances[indexOf(p)] ?? 0));
+  const [low, high] = CAMP_DISTANCE_SHARE;
+  const middle = free.filter((p) => {
+    const share = (distances[indexOf(p)] ?? 0) / farthest;
+    return share >= low && share <= high;
+  });
+  if (middle.length > 0) return rng.pick(middle);
+  return free.length > 0 ? rng.pick(free) : null;
+}
+
+/**
+ * Regular creatures are drawn from those introduced in the last ten floors, favoring the newest,
+ * and placed away from the entrance. Guardian floors add their guardian far from the entrance.
+ */
+function spawnCreatures(
+  rng: Rng,
+  depth: number,
+  tiles: readonly TileKind[],
+  distances: readonly number[],
+  reserved: readonly Point[],
+): Monster[] {
+  const open: Point[] = [];
+  for (let index = 0; index < tiles.length; index++) {
+    const point = pointOf(index);
+    const kind = tiles[index] as TileKind;
+    if (kind !== Tile.Floor) continue;
+    if ((distances[index] ?? -1) <= SPAWN_CLEARANCE) continue;
+    if (reserved.some((r) => samePoint(r, point))) continue;
+    open.push(point);
+  }
+
+  const pool = CREATURES.filter(
+    (c) => !("guardian" in c) && c.firstFloor <= depth && c.firstFloor > depth - CREATURE_LIFESPAN,
+  );
+  const weight = (c: CreatureKind) => (c.firstFloor > depth - NEW_CREATURE_WINDOW - 1 ? 3 : 1);
+  const monsters: Monster[] = [];
+  const place = (kind: CreatureKind, at: Point) => {
+    const { hp, attack } = scaledStats(kind, depth, rng.float());
+    monsters.push({
+      id: `${depth}-${monsters.length + 1}`,
+      kind: kind.id as Monster["kind"],
+      x: at.x,
+      y: at.y,
+      hp,
+      maxHp: hp,
+      attack,
+      alert: false,
+      lastSeen: null,
+      ready: false,
+      facing: rng.chance(0.5) ? "left" : "right",
+    });
+  };
+
+  const guardian = CREATURES.find((c) => "guardian" in c && c.firstFloor === depth);
+  if (guardian && open.length > 0) {
+    const farthest = Math.max(...open.map((p) => distances[indexOf(p)] ?? 0));
+    const far = open.filter((p) => (distances[indexOf(p)] ?? 0) >= farthest * 0.8);
+    const at = rng.pick(far.length > 0 ? far : open);
+    open.splice(open.indexOf(at), 1);
+    place(guardian, at);
+  }
+
+  for (let i = 0; i < creatureCount(depth) && open.length > 0 && pool.length > 0; i++) {
+    const at = rng.pick(open);
+    open.splice(open.indexOf(at), 1);
+    place(weightedPick(rng, pool, weight), at);
+  }
+  return monsters;
+}
+
+function weightedPick<T>(rng: Rng, items: readonly T[], weight: (item: T) => number): T {
+  const total = items.reduce((sum, item) => sum + weight(item), 0);
+  let roll = rng.float() * total;
+  for (const item of items) {
+    roll -= weight(item);
+    if (roll < 0) return item;
+  }
+  return items[items.length - 1] as T;
 }
 
 function layoutAreas(rng: Rng): Area[] {

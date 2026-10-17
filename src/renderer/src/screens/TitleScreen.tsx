@@ -3,6 +3,7 @@ import { FLOOR_COUNT } from "../../../engine/map";
 import {
   CHARACTER_NAME_MAX,
   type CharacterSave,
+  type CharacterSummary,
   normalizeCharacterName,
 } from "../../../engine/save";
 import type { CharacterListing, ReadyDetails, SaveBridge } from "../../../shared/bridge";
@@ -12,6 +13,13 @@ import { readableError, savesAreLocalToBrowser } from "../saves/saveService";
 import { useBuildLabel } from "../useBuildLabel";
 
 const FIRST_CHARACTER_NAME = "Wanderer";
+
+/** "Level 3 · Floor 7 of 30", "Fell on floor 7", or "Between descents". */
+function describeProgress(summary: CharacterSummary): string {
+  if (summary.status === "none" || summary.depth === null) return "Between descents";
+  if (summary.status === "dead") return `Fell on floor ${summary.depth}`;
+  return `Level ${summary.level ?? 1} · Floor ${summary.depth} of ${FLOOR_COUNT}`;
+}
 
 interface TitleScreenProps {
   saves: SaveBridge;
@@ -130,9 +138,7 @@ export function TitleScreen({ saves, autoContinue, onPlay, onReady }: TitleScree
                   >
                     <span className="font-display text-lg text-bone">{listing.summary.name}</span>
                     <span className="text-xs text-bone/60">
-                      {listing.summary.depth === null
-                        ? "Between descents"
-                        : `Floor ${listing.summary.depth} of ${FLOOR_COUNT}`}
+                      {describeProgress(listing.summary)}
                       {" · "}deepest {listing.summary.deepestFloor}
                       {" · "}
                       {formatPlayTime(listing.summary.playTimeMs)} played

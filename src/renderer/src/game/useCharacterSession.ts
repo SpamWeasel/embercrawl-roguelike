@@ -1,8 +1,15 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { Point } from "../../../engine/geometry";
+import { indexOf } from "../../../engine/map";
 import { findPath } from "../../../engine/path";
-import { type Action, type ActionResult, applyAction, currentFloor } from "../../../engine/run";
-import { type CharacterSave, updateCharacter } from "../../../engine/save";
+import {
+  type Action,
+  type ActionResult,
+  applyAction,
+  currentFloor,
+  type GameEvent,
+} from "../../../engine/run";
+import { beginDescent, type CharacterSave, updateCharacter } from "../../../engine/save";
 import type { SaveBridge } from "../../../shared/bridge";
 import { readableError } from "../saves/saveService";
 import { AUTO_WALK_STEP_MS } from "./timing";
@@ -21,10 +28,22 @@ export interface CharacterSession {
    * before React re-renders, so the view can animate each step. Returns an unsubscribe function.
    */
   subscribe(listener: ActionListener): () => void;
+  /** Starts a fresh descent for this character (after death). */
+  beginNewDescent(): void;
   readonly saveError: string | null;
 }
 
 export type ActionListener = (result: ActionResult) => void;
+
+/** Anything that should stop a click-to-walk in its tracks. */
+const DANGER: ReadonlySet<GameEvent["type"]> = new Set([
+  "monster-noticed",
+  "monster-readied",
+  "monster-struck",
+  "spotted",
+  "attacked",
+  "died",
+]);
 
 /** Owns one character while it is being played: applies actions, autosaves, and tracks play time. */
 export function useCharacterSession(initial: CharacterSave, saves: SaveBridge): CharacterSession {
@@ -43,17 +62,8 @@ export function useCharacterSession(initial: CharacterSave, saves: SaveBridge): 
     };
   }, []);
 
-  const play = useCallback(
-    (action: Action): ActionResult | null => {
-      const save = current.current;
-      if (!save.run) return null;
-      const result = applyAction(save.run, action);
-      for (const listener of listeners.current) listener(result);
-      if (!result.tookTurn) return result;
-      const next = updateCharacter(save, result.run, {
-        now: new Date().toISOString(),
-        playTimeMs: initial.playTimeMs + Math.round(performance.now() - sessionStart.current),
-      });
+  const commit = useCallback(
+    (next: CharacterSave) => {
       current.current = next;
       setCharacter(next);
       // Every turn is saved. The desktop shell writes only the newest if saves pile up.
@@ -61,9 +71,26 @@ export function useCharacterSession(initial: CharacterSave, saves: SaveBridge): 
         () => setSaveError(null),
         (error: unknown) => setSaveError(readableError(error)),
       );
+    },
+    [saves],
+  );
+
+  const play = useCallback(
+    (action: Action): ActionResult | null => {
+      const save = current.current;
+      if (!save.run) return null;
+      const result = applyAction(save.run, action);
+      for (const listener of listeners.current) listener(result);
+      if (!result.tookTurn) return result;
+      commit(
+        updateCharacter(save, result.run, {
+          now: new Date().toISOString(),
+          playTimeMs: initial.playTimeMs + Math.round(performance.now() - sessionStart.current),
+        }),
+      );
       return result;
     },
-    [initial.playTimeMs, saves],
+    [commit, initial.playTimeMs],
   );
 
   const cancelWalk = useCallback(() => {
@@ -85,13 +112,23 @@ export function useCharacterSession(initial: CharacterSave, saves: SaveBridge): 
       const run = current.current.run;
       if (!run) return;
       const floor = currentFloor(run);
-      const route = findPath(floor.tiles, run.hero, target, (i) => floor.explored[i] === true);
+      // Walk around creatures rather than into them; clicking one walks up and attacks it.
+      const occupied = new Set(floor.monsters.map((m) => indexOf(m)));
+      const goal = indexOf(target);
+      const route = findPath(
+        floor.tiles,
+        run.hero,
+        target,
+        (i) => floor.explored[i] === true && (!occupied.has(i) || i === goal),
+      );
       if (!route || route.length === 0) return;
       let next = 0;
       const advance = (): boolean => {
         const direction = route[next++];
         const result = direction ? play({ type: "move", direction }) : null;
-        return !!result?.tookTurn && next < route.length && result.run.depth === run.depth;
+        if (!result?.tookTurn || result.run.depth !== run.depth) return false;
+        if (result.events.some((event) => DANGER.has(event.type))) return false;
+        return next < route.length;
       };
       if (advance()) {
         walkTimer.current = setInterval(() => {
@@ -106,5 +143,11 @@ export function useCharacterSession(initial: CharacterSave, saves: SaveBridge): 
 
   const flush = useCallback(() => lastWrite.current, []);
 
-  return { character, act, walkTo, cancelWalk, flush, subscribe, saveError };
+  const beginNewDescent = useCallback(() => {
+    cancelWalk();
+    const seed = crypto.getRandomValues(new Uint32Array(1))[0] ?? 0;
+    commit(beginDescent(current.current, seed, new Date().toISOString()));
+  }, [cancelWalk, commit]);
+
+  return { character, act, walkTo, cancelWalk, flush, subscribe, beginNewDescent, saveError };
 }

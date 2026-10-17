@@ -34,7 +34,28 @@ improve:
 - Achievements, bestiary and run history that survive death.
 - **Balance target:** a fixed, simple bot wins 25–35% of runs on seeds kept apart from tuning.
 
-Lore is undecided: keep the buried observatory and beacon, or write a new story.
+**Lore (decided 2026-10-17):** keep Emberdepths' setting, retold in Embercrawl's own words.
+Astronomers built an observatory downward, chasing a fallen star thirty floors into the earth, and
+lit the Beacon at the bottom to hold back what woke there. The Beacon is guttering; the hero
+descends with the keeper's lantern to rekindle it. The text lives in
+`src/renderer/src/game/lore.ts`. The 25 creature names are kept from Emberdepths so the owner's
+art matches; descriptions are new.
+
+**Built in milestone 3:**
+- **Combat.** Moving into a creature attacks it (damage = attack power + 0–2). Creatures strike
+  back for their attack + 0–1 − defense (at least 1), shields absorbing first. XP levels the hero
+  up (+5 max health, +10 health).
+- **Creatures** follow their behavior (chase, slow, ranged, erratic, swift) with real
+  pathfinding. They notice the hero within 7 tiles in clear view, hunt toward where they last saw
+  them, and **telegraph**: a creature in reach first readies (a red marker), then strikes on its
+  next turn if the hero is still in reach. Stepping away dodges it.
+- **The lantern:** dim (sight 4) or bright (sight 6, 1 charge per turn); pulse costs 20 charge,
+  hits creatures within 2 tiles in view for attack + 4, and adds a 4-point shield.
+- **Camps** (moved up from milestone 4): one per floor, warded so creatures can't enter or strike
+  there. Resting once restores 75% of max health and 30 charge.
+- **Death** ends the descent. The character keeps their records (deaths, deepest floor, bestiary)
+  and can begin a new descent.
+- Every combat number is in `src/engine/rules.ts`, which milestone 5's balance bot will tune.
 
 ## 2. Diagonal movement
 
@@ -185,8 +206,8 @@ Embercrawl.exe (Electron)
 | 0 ✅ | Foundation: repository, `CLAUDE.md`, Electron + PixiJS + React skeleton, tests, x64/ARM64 installers | Install and launch Embercrawl |
 | 1 ✅ | Walkable dungeon: floor generation, 8-way movement and corner rule, fog, stairs, keyboard and mouse, floor palettes every three floors, title screen with multiple characters (first one created automatically), autosave to disk | Walk floors, quit, and resume |
 | 2 ✅ | **Feel pass:** smooth motion, camera, lantern lighting, particles, input queuing, fullscreen and scaling | Judge the feel early |
-| 3 | Combat and creatures: behaviors adapted to 8-way, leveling, death, combat effects (sparks, damage numbers, dissolves, pulse shockwave) | Fight |
-| 4 | Items and inventory, tooltips and comparisons | Gear up |
+| 3 ✅ | Combat and creatures: behaviors adapted to 8-way, leveling, death, the lantern, camps, combat effects (sparks, damage numbers, dissolves, pulse shockwave) | Fight |
+| 4 | Items and inventory (healing, gear, traps), tooltips and comparisons | Gear up |
 | 5 | Full descent: 30 floors of content, guardians, shops, victory; bot re-tuned to 25–35% | Play a whole run |
 | 6 | Characters, saves and settings: character select, export/import, backups, file association, key remapping, gamepad | Manage characters and move saves between PCs |
 | 7 | Art and audio pass | |
@@ -202,6 +223,5 @@ aren't installed through Steam.
 
 ## Open decisions
 
-- Lore: keep the observatory and beacon, or a new story.
 - Operating systems beyond Windows (macOS, Linux/Steam Deck): deferred.
 - Distribution (itch.io or Steam): decide at milestone 8.

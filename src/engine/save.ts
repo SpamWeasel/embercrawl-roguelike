@@ -1,5 +1,8 @@
 import { z } from "zod";
+import { CREATURE_IDS, type CreatureId } from "./creatures";
 import { FLOOR_COUNT, isWalkable, MAP_HEIGHT, MAP_SIZE, MAP_WIDTH, tileAt } from "./map";
+import { Rng } from "./rng";
+import { HERO_START_HP, LANTERN_MAX } from "./rules";
 import { newRun, type RunState } from "./run";
 
 /**
@@ -7,15 +10,22 @@ import { newRun, type RunState } from "./run";
  *
  * Changing this format: bump SAVE_VERSION, add an upgrade step to UPGRADES that turns the previous
  * version into the new one, and add a test that loads a file in the previous format.
+ *
+ * Version history:
+ * 1. Exploration only (milestone 1).
+ * 2. Creatures, combat, the lantern, camps and the bestiary (milestone 3).
  */
 export const SAVE_FORMAT = "embercrawl-character";
-export const SAVE_VERSION = 1;
+export const SAVE_VERSION = 2;
 export const CHARACTER_NAME_MAX = 24;
 
 export interface CharacterRecord {
   /** Descents started, including the current one. */
   readonly descents: number;
   readonly deepestFloor: number;
+  readonly deaths: number;
+  /** Every creature kind this character has ever seen (their bestiary). */
+  readonly discovered: readonly CreatureId[];
 }
 
 export interface CharacterSave {
@@ -26,7 +36,7 @@ export interface CharacterSave {
   readonly createdAt: string;
   readonly updatedAt: string;
   readonly playTimeMs: number;
-  /** The descent in progress, or null between descents. */
+  /** The current descent (possibly just ended in death), or null between descents. */
   readonly run: RunState | null;
   readonly record: CharacterRecord;
 }
@@ -36,6 +46,9 @@ export interface CharacterSummary {
   readonly id: string;
   readonly name: string;
   readonly depth: number | null;
+  readonly level: number | null;
+  /** "active": mid-descent. "dead": the last descent ended in death. "none": between descents. */
+  readonly status: "active" | "dead" | "none";
   readonly deepestFloor: number;
   readonly playTimeMs: number;
   readonly createdAt: string;
@@ -71,6 +84,7 @@ export interface NewCharacterOptions {
 }
 
 export function newCharacter({ id, name, now, seed }: NewCharacterOptions): CharacterSave {
+  const run = newRun(seed);
   return {
     format: SAVE_FORMAT,
     version: SAVE_VERSION,
@@ -79,8 +93,23 @@ export function newCharacter({ id, name, now, seed }: NewCharacterOptions): Char
     createdAt: now,
     updatedAt: now,
     playTimeMs: 0,
-    run: newRun(seed),
-    record: { descents: 1, deepestFloor: 1 },
+    run,
+    record: { descents: 1, deepestFloor: 1, deaths: 0, discovered: [...run.discovered] },
+  };
+}
+
+/** Starts a fresh descent (after a death, or between descents). The character keeps its records. */
+export function beginDescent(save: CharacterSave, seed: number, now: string): CharacterSave {
+  const run = newRun(seed);
+  return {
+    ...save,
+    run,
+    updatedAt: now,
+    record: {
+      ...save.record,
+      descents: save.record.descents + 1,
+      discovered: mergeDiscovered(save.record.discovered, run.discovered),
+    },
   };
 }
 
@@ -90,6 +119,7 @@ export function updateCharacter(
   run: RunState | null,
   { now, playTimeMs }: { readonly now: string; readonly playTimeMs: number },
 ): CharacterSave {
+  const justDied = run?.status === "dead" && save.run?.status === "active";
   return {
     ...save,
     run,
@@ -98,8 +128,18 @@ export function updateCharacter(
     record: {
       ...save.record,
       deepestFloor: Math.max(save.record.deepestFloor, run?.depth ?? 0),
+      deaths: save.record.deaths + (justDied ? 1 : 0),
+      discovered: mergeDiscovered(save.record.discovered, run?.discovered ?? []),
     },
   };
+}
+
+function mergeDiscovered(
+  known: readonly CreatureId[],
+  seen: readonly CreatureId[],
+): readonly CreatureId[] {
+  const added = seen.filter((kind) => !known.includes(kind));
+  return added.length === 0 ? known : [...known, ...added];
 }
 
 export function summarizeCharacter(save: CharacterSave): CharacterSummary {
@@ -107,6 +147,8 @@ export function summarizeCharacter(save: CharacterSave): CharacterSummary {
     id: save.id,
     name: save.name,
     depth: save.run?.depth ?? null,
+    level: save.run?.hero.level ?? null,
+    status: save.run?.status ?? "none",
     deepestFloor: save.record.deepestFloor,
     playTimeMs: save.playTimeMs,
     createdAt: save.createdAt,
@@ -137,10 +179,48 @@ export function parseCharacterSave(data: unknown): CharacterSave {
   return result.data;
 }
 
-/** Upgrade steps, keyed by the version they upgrade from. Empty until the format first changes. */
+/** Upgrade steps, keyed by the version they upgrade from. */
 const UPGRADES: Readonly<
   Record<number, (save: Record<string, unknown>) => Record<string, unknown>>
-> = {};
+> = {
+  /**
+   * 1 → 2: adds combat. The hero starts at full health on level 1 with a full lantern. Floors
+   * already explored stay empty of creatures and have no camp; floors visited later get both.
+   */
+  1: (save) => {
+    const record = isRecord(save.record) ? save.record : {};
+    return {
+      ...save,
+      run: isRecord(save.run) ? upgradeRunFrom1(save.run) : null,
+      record: { ...record, deaths: 0, discovered: [] },
+    };
+  },
+};
+
+function upgradeRunFrom1(run: Record<string, unknown>): Record<string, unknown> {
+  const seed = Number.isInteger(run.seed) ? (run.seed as number) : 0;
+  const floors = Array.isArray(run.floors) ? run.floors : [];
+  return {
+    ...run,
+    hero: {
+      ...(isRecord(run.hero) ? run.hero : {}),
+      hp: HERO_START_HP,
+      maxHp: HERO_START_HP,
+      level: 1,
+      xp: 0,
+      shield: 0,
+    },
+    lantern: { charge: LANTERN_MAX, bright: false },
+    rng: Rng.derive(seed, "play").state(),
+    kills: 0,
+    discovered: [],
+    status: "active",
+    killedBy: null,
+    floors: floors.map((floor) =>
+      isRecord(floor) ? { ...floor, camp: null, campUsed: false, monsters: [] } : floor,
+    ),
+  };
+}
 
 function upgradeToCurrent(data: Record<string, unknown>): Record<string, unknown> {
   let current = data;
@@ -156,6 +236,8 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
+const Count = z.number().int().min(0);
+
 const PointSchema = z.object({
   x: z
     .number()
@@ -169,7 +251,23 @@ const PointSchema = z.object({
     .max(MAP_HEIGHT - 1),
 });
 
+const FacingSchema = z.enum(["left", "right"]);
+
+const CreatureIdSchema = z.enum(CREATURE_IDS as unknown as [CreatureId, ...CreatureId[]]);
+
 const TileSchema = z.union([z.literal(0), z.literal(1), z.literal(2), z.literal(3)]);
+
+const MonsterSchema = PointSchema.extend({
+  id: z.string().min(1).max(16),
+  kind: CreatureIdSchema,
+  hp: z.number().int().min(1),
+  maxHp: z.number().int().min(1),
+  attack: z.number().int().min(1),
+  alert: z.boolean(),
+  lastSeen: PointSchema.nullable(),
+  ready: z.boolean(),
+  facing: FacingSchema,
+});
 
 const FloorSchema = z.object({
   depth: z.number().int().min(1).max(FLOOR_COUNT),
@@ -178,15 +276,39 @@ const FloorSchema = z.object({
   upStairs: PointSchema.nullable(),
   downStairs: PointSchema.nullable(),
   entrance: PointSchema,
+  camp: PointSchema.nullable(),
+  campUsed: z.boolean(),
+  monsters: z.array(MonsterSchema).max(40),
 });
+
+const HeroSchema = PointSchema.extend({
+  facing: FacingSchema,
+  hp: Count,
+  maxHp: z.number().int().min(1),
+  level: z.number().int().min(1).max(99),
+  xp: Count,
+  shield: Count,
+});
+
+const Uint32 = z
+  .number()
+  .int()
+  .min(0)
+  .max(2 ** 32 - 1);
 
 const RunSchema = z
   .object({
     seed: z.number().int(),
-    turn: z.number().int().min(0),
+    turn: Count,
     depth: z.number().int().min(1).max(FLOOR_COUNT),
     floors: z.array(FloorSchema).min(1).max(FLOOR_COUNT),
-    hero: PointSchema.extend({ facing: z.enum(["left", "right"]) }),
+    hero: HeroSchema,
+    lantern: z.object({ charge: Count.max(LANTERN_MAX), bright: z.boolean() }),
+    rng: z.tuple([Uint32, Uint32, Uint32, Uint32]),
+    kills: Count,
+    discovered: z.array(CreatureIdSchema),
+    status: z.enum(["active", "dead"]),
+    killedBy: CreatureIdSchema.nullable(),
   })
   .refine((run) => new Set(run.floors.map((f) => f.depth)).size === run.floors.length, {
     message: "Each floor may appear only once.",
@@ -197,7 +319,10 @@ const RunSchema = z
       return floor !== undefined && isWalkable(tileAt(floor.tiles, run.hero));
     },
     { message: "The hero must stand on an open tile of the current floor." },
-  );
+  )
+  .refine((run) => run.hero.hp <= run.hero.maxHp, {
+    message: "The hero's health can't exceed their maximum.",
+  });
 
 const IsoTimestamp = z.iso.datetime({ offset: true });
 
@@ -208,10 +333,12 @@ const CharacterSchema = z.object({
   name: z.string().min(1).max(CHARACTER_NAME_MAX),
   createdAt: IsoTimestamp,
   updatedAt: IsoTimestamp,
-  playTimeMs: z.number().int().min(0),
+  playTimeMs: Count,
   run: RunSchema.nullable(),
   record: z.object({
-    descents: z.number().int().min(0),
-    deepestFloor: z.number().int().min(0).max(FLOOR_COUNT),
+    descents: Count,
+    deepestFloor: Count.max(FLOOR_COUNT),
+    deaths: Count,
+    discovered: z.array(CreatureIdSchema),
   }),
 }) satisfies z.ZodType<CharacterSave>;

@@ -5,19 +5,24 @@ import {
   type Action,
   availableInteraction,
   currentFloor,
-  type GameEvent,
+  sightRadius,
   visibleTiles,
 } from "../../../engine/run";
 import type { CharacterSave } from "../../../engine/save";
 import type { ReadyDetails, SaveBridge } from "../../../shared/bridge";
-import { toggleFullscreen } from "../fullscreen";
+import { describeResult } from "../game/messages";
 import { useCharacterSession } from "../game/useCharacterSession";
 import { useGameKeys } from "../input/useGameKeys";
 import { DungeonCanvas } from "../render/dungeon/DungeonCanvas";
 import { paletteForFloor } from "../render/dungeon/palettes";
+import { type LogEntry, MessageLog } from "./game/MessageLog";
+import { DeathScreen, IntroCard, PauseMenu } from "./game/Overlays";
+import { StatMeters } from "./game/StatMeters";
 
-/** How long a message stays at the bottom of the screen. */
-const MESSAGE_MS = 4000;
+/** How many log lines stay on screen. */
+const LOG_LINES = 4;
+/** Lets the fall animation play before the death screen appears. */
+const DEATH_SCREEN_DELAY_MS = 1300;
 
 interface GameScreenProps {
   initial: CharacterSave;
@@ -33,30 +38,21 @@ interface Banner {
   readonly region: string;
 }
 
-function describe(events: readonly GameEvent[]): string | null {
-  for (const event of events) {
-    if (event.type === "no-stairs") return "There are no stairs here.";
-  }
-  return null;
-}
-
 export function GameScreen({ initial, saves, onExit, onReady }: GameScreenProps) {
   const session = useCharacterSession(initial, saves);
-  const { character, act, walkTo, cancelWalk, flush, subscribe } = session;
+  const { character, act, walkTo, cancelWalk, flush, subscribe, beginNewDescent } = session;
   const run = character.run;
   const [menuOpen, setMenuOpen] = useState(false);
-  const [message, setMessage] = useState<string | null>(null);
   const [leaving, setLeaving] = useState(false);
+  const [log, setLog] = useState<LogEntry[]>([]);
+  const logCount = useRef(0);
   const bannerCount = useRef(0);
-  const [banner, setBanner] = useState<Banner | null>(() =>
-    initial.run
-      ? {
-          key: 0,
-          floor: initial.run.depth,
-          region: paletteForFloor(initial.run.seed, initial.run.depth).name,
-        }
-      : null,
+  const [banner, setBanner] = useState<Banner | null>(null);
+  // The story card opens a brand-new descent; returning players go straight in.
+  const [introOpen, setIntroOpen] = useState(
+    () => initial.run?.turn === 0 && initial.run.depth === 1,
   );
+  const [deathShown, setDeathShown] = useState(() => initial.run?.status === "dead");
 
   const model = useMemo(
     () =>
@@ -66,36 +62,55 @@ export function GameScreen({ initial, saves, onExit, onReady }: GameScreenProps)
             palette: paletteForFloor(run.seed, run.depth),
             hero: run.hero,
             visible: visibleTiles(run),
+            sightRadius: sightRadius(run.lantern),
           }
         : null,
     [run],
   );
   const interaction = run ? availableInteraction(run) : null;
+  const alive = run?.status === "active";
+
+  const showBanner = useCallback((seed: number, floor: number) => {
+    bannerCount.current += 1;
+    setBanner({ key: bannerCount.current, floor, region: paletteForFloor(seed, floor).name });
+  }, []);
+
+  // Arriving in the game (without the story card) shows where you are.
+  const firstBanner = useRef(false);
+  useEffect(() => {
+    if (firstBanner.current || introOpen || !initial.run || initial.run.status !== "active") return;
+    firstBanner.current = true;
+    showBanner(initial.run.seed, initial.run.depth);
+  }, [introOpen, initial.run, showBanner]);
 
   useEffect(() => {
-    if (!message) return;
-    const timer = setTimeout(() => setMessage(null), MESSAGE_MS);
+    if (run?.status !== "dead" || deathShown) return;
+    const timer = setTimeout(() => setDeathShown(true), DEATH_SCREEN_DELAY_MS);
     return () => clearTimeout(timer);
-  }, [message]);
+  }, [run?.status, deathShown]);
 
   const perform = useCallback(
     (action: Action) => {
       const result = act(action);
       if (!result) return;
-      const text = describe(result.events);
-      if (text) setMessage(text);
-      const arrival = result.events.find((event) => event.type === "changed-floor");
-      if (arrival) {
-        bannerCount.current += 1;
-        setBanner({
-          key: bannerCount.current,
-          floor: arrival.to,
-          region: paletteForFloor(result.run.seed, arrival.to).name,
-        });
+      const lines = describeResult(result);
+      if (lines.length > 0) {
+        setLog((previous) =>
+          [...previous, ...lines.map((line) => ({ ...line, id: logCount.current++ }))].slice(
+            -LOG_LINES,
+          ),
+        );
       }
+      const arrival = result.events.find((event) => event.type === "changed-floor");
+      if (arrival) showBanner(result.run.seed, arrival.to);
     },
-    [act],
+    [act, showBanner],
   );
+
+  const interact = useCallback(() => {
+    if (run && availableInteraction(run)?.kind === "rest") perform({ type: "rest" });
+    else perform({ type: "use-stairs" });
+  }, [run, perform]);
 
   const openMenu = useCallback(() => {
     cancelWalk();
@@ -106,23 +121,25 @@ export function GameScreen({ initial, saves, onExit, onReady }: GameScreenProps)
     {
       move: (direction) => perform({ type: "move", direction }),
       wait: () => perform({ type: "wait" }),
-      interact: () => perform({ type: "use-stairs" }),
+      interact,
+      toggleLight: () => perform({ type: "toggle-light" }),
+      pulse: () => perform({ type: "pulse" }),
       menu: openMenu,
     },
-    !menuOpen && !leaving,
+    alive && !menuOpen && !leaving && !introOpen,
   );
 
   const onTileClick = useCallback(
     (tile: Point) => {
-      if (!run) return;
-      // Clicking the stairs you stand on uses them.
+      if (run?.status !== "active" || introOpen) return;
+      // Clicking the tile you stand on uses it (stairs or camp).
       if (samePoint(tile, run.hero)) {
-        if (availableInteraction(run)) perform({ type: "use-stairs" });
+        if (availableInteraction(run)) interact();
         return;
       }
       walkTo(tile);
     },
-    [run, perform, walkTo],
+    [run, introOpen, interact, walkTo],
   );
 
   const exitToTitle = async () => {
@@ -131,15 +148,25 @@ export function GameScreen({ initial, saves, onExit, onReady }: GameScreenProps)
     onExit();
   };
 
+  const startOver = () => {
+    beginNewDescent();
+    setDeathShown(false);
+    setLog([]);
+    setIntroOpen(true);
+  };
+
   if (!run || !model) {
     return (
-      <main className="grid h-dvh place-items-center text-bone/70">
-        <p>
-          {character.name} is between descents. Starting a new descent arrives in a later milestone.
-        </p>
+      <main className="grid h-dvh place-items-center gap-4 text-bone/70">
+        <p>{character.name} is between descents.</p>
+        <button type="button" className="btn btn-primary" onClick={startOver}>
+          Begin a new descent
+        </button>
       </main>
     );
   }
+
+  const lowHealth = alive && run.hero.hp <= run.hero.maxHp * 0.3;
 
   return (
     <main className="relative h-dvh w-full select-none overflow-hidden bg-abyss">
@@ -150,6 +177,7 @@ export function GameScreen({ initial, saves, onExit, onReady }: GameScreenProps)
         onTileClick={onTileClick}
         onReady={(renderer) => onReady({ renderer, scene: "game" })}
       />
+      {lowHealth && <div className="low-health pointer-events-none absolute inset-0 z-[5]" />}
 
       {banner && (
         <div key={banner.key} className="floor-banner" onAnimationEnd={() => setBanner(null)}>
@@ -160,15 +188,16 @@ export function GameScreen({ initial, saves, onExit, onReady }: GameScreenProps)
         </div>
       )}
 
-      <header className="hud-bar hud-top">
-        <div className="flex items-baseline gap-3">
+      <header className="hud-bar hud-top gap-6">
+        <div className="flex shrink-0 flex-col leading-tight">
           <span className="font-display text-lg text-bone">{character.name}</span>
-          <span className="text-sm text-ember">
+          <span className="text-xs text-ember">
             Floor {run.depth} <span className="text-bone/50">of {FLOOR_COUNT}</span>
+            <span className="text-bone/55"> · {model.palette.name}</span>
           </span>
-          <span className="text-sm text-bone/55">{model.palette.name}</span>
         </div>
-        <div className="flex items-center gap-4 text-sm text-bone/60">
+        <StatMeters hero={run.hero} lantern={run.lantern} />
+        <div className="flex shrink-0 items-center gap-4 text-sm text-bone/60">
           <span>Turn {run.turn}</span>
           <button type="button" className="btn btn-small" onClick={openMenu}>
             Menu <kbd className="kbd">Esc</kbd>
@@ -177,27 +206,22 @@ export function GameScreen({ initial, saves, onExit, onReady }: GameScreenProps)
       </header>
 
       <footer className="hud-bar hud-bottom">
-        {interaction && (
-          <button
-            type="button"
-            className="btn btn-primary"
-            onClick={() => perform({ type: "use-stairs" })}
-          >
-            {interaction.kind === "descend"
-              ? `Descend to floor ${interaction.toDepth}`
-              : `Climb up to floor ${interaction.toDepth}`}
+        {interaction && alive && (
+          <button type="button" className="btn btn-primary" onClick={interact}>
+            {interaction.kind === "rest"
+              ? "Rest by the fire"
+              : interaction.kind === "descend"
+                ? `Descend to floor ${interaction.toDepth}`
+                : `Climb up to floor ${interaction.toDepth}`}
             <kbd className="kbd">Enter</kbd>
           </button>
         )}
-        {message && (
-          <p className="text-sm text-bone" role="status">
-            {message}
-          </p>
-        )}
+        <MessageLog entries={log} />
         <p className="text-xs text-bone/45">
-          Move <kbd className="kbd">WASD</kbd> or arrows · diagonals{" "}
-          <kbd className="kbd">Q E Z C</kbd>, number pad or two keys together · wait{" "}
-          <kbd className="kbd">Space</kbd> · click a tile to walk there
+          Move <kbd className="kbd">WASD</kbd> / arrows · diagonals{" "}
+          <kbd className="kbd">Q E Z C</kbd> · attack by moving into a creature · wait{" "}
+          <kbd className="kbd">Space</kbd> · lantern <kbd className="kbd">L</kbd> · pulse{" "}
+          <kbd className="kbd">F</kbd> · use <kbd className="kbd">Enter</kbd>
         </p>
       </footer>
 
@@ -205,6 +229,24 @@ export function GameScreen({ initial, saves, onExit, onReady }: GameScreenProps)
         <p role="alert" className="save-warning">
           Could not save: {session.saveError}
         </p>
+      )}
+
+      {introOpen && alive && (
+        <IntroCard
+          onBegin={() => {
+            setIntroOpen(false);
+            showBanner(run.seed, run.depth);
+          }}
+        />
+      )}
+
+      {deathShown && run.status === "dead" && (
+        <DeathScreen
+          run={run}
+          deepestFloor={character.record.deepestFloor}
+          onNewDescent={startOver}
+          onTitle={() => void exitToTitle()}
+        />
       )}
 
       {menuOpen && (
@@ -215,52 +257,5 @@ export function GameScreen({ initial, saves, onExit, onReady }: GameScreenProps)
         />
       )}
     </main>
-  );
-}
-
-function PauseMenu({
-  leaving,
-  onResume,
-  onExit,
-}: {
-  leaving: boolean;
-  onResume(): void;
-  onExit(): void;
-}) {
-  useEffect(() => {
-    const onKey = (event: KeyboardEvent) => {
-      if (event.code === "Escape") {
-        event.preventDefault();
-        onResume();
-      }
-    };
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
-  }, [onResume]);
-
-  return (
-    <div className="absolute inset-0 z-20 grid place-items-center bg-black/60 backdrop-blur-[2px]">
-      <div
-        role="dialog"
-        aria-modal="true"
-        aria-labelledby="menu-heading"
-        className="panel flex w-72 flex-col gap-3 p-6"
-      >
-        <h2 id="menu-heading" className="mb-1 text-center font-display text-2xl text-bone">
-          Paused
-        </h2>
-        {/* biome-ignore lint/a11y/noAutofocus: the menu should take keyboard focus as it opens. */}
-        <button type="button" className="btn btn-primary" onClick={onResume} autoFocus>
-          Resume
-        </button>
-        <button type="button" className="btn" onClick={() => void toggleFullscreen()}>
-          Fullscreen <kbd className="kbd">F11</kbd>
-        </button>
-        <button type="button" className="btn" onClick={onExit} disabled={leaving}>
-          {leaving ? "Saving…" : "Save and return to title"}
-        </button>
-        <p className="text-center text-xs text-bone/45">Your descent is saved after every turn.</p>
-      </div>
-    </div>
   );
 }

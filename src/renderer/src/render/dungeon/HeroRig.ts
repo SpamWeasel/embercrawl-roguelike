@@ -1,5 +1,6 @@
 import { Container, Graphics, Sprite, type Texture } from "pixi.js";
 import type { Point } from "../../../../engine/geometry";
+import { mixColor } from "./lighting";
 import { clamp01, moveToward } from "./motion";
 import { TILE_PIXELS } from "./textures";
 
@@ -13,6 +14,10 @@ const HOP_PIXELS = 1.6;
 const LAND_MS = 150;
 /** Standing still this long fades in the idle breathing. */
 const IDLE_AFTER_MS = 250;
+/** Attacking leans further and longer than a wall bump. */
+const LUNGE_MS = 160;
+const LUNGE_PIXELS = 4.5;
+const FLASH_MS = 260;
 
 /**
  * The hero's sprite with everything that makes a single still image feel alive: a ground shadow,
@@ -26,11 +31,16 @@ export class HeroRig {
   private readonly baseScale: number;
   private facing = 1;
   private facingTarget = 1;
-  private bump: { dx: number; dy: number; ms: number } | null = null;
+  private bump: { dx: number; dy: number; ms: number; length: number; pixels: number } | null =
+    null;
   private sinceLandMs = Number.POSITIVE_INFINITY;
   private idleMs = Number.POSITIVE_INFINITY;
   private sink = 0;
   private sinking = false;
+  private flashColor = 0xffffff;
+  private flashMs = Number.POSITIVE_INFINITY;
+  private collapsing = false;
+  private fall = 0;
 
   constructor(
     texture: Texture,
@@ -51,7 +61,24 @@ export class HeroRig {
 
   startBump(dx: number, dy: number): void {
     if (this.reducedMotion) return;
-    this.bump = { dx, dy, ms: 0 };
+    this.bump = { dx, dy, ms: 0, length: BUMP_MS, pixels: BUMP_PIXELS };
+  }
+
+  /** Leans into an attack. */
+  lunge(dx: number, dy: number): void {
+    if (this.reducedMotion) return;
+    this.bump = { dx, dy, ms: 0, length: LUNGE_MS, pixels: LUNGE_PIXELS };
+  }
+
+  /** Tints toward `color` and back, e.g. red when hurt. */
+  flash(color: number): void {
+    this.flashColor = color;
+    this.flashMs = 0;
+  }
+
+  /** Falls when slain; stays down until `reset`. */
+  collapse(): void {
+    this.collapsing = true;
   }
 
   landed(): void {
@@ -69,6 +96,9 @@ export class HeroRig {
     this.sink = 0;
     this.bump = null;
     this.sinceLandMs = Number.POSITIVE_INFINITY;
+    this.collapsing = false;
+    this.fall = 0;
+    this.flashMs = Number.POSITIVE_INFINITY;
   }
 
   /**
@@ -81,6 +111,8 @@ export class HeroRig {
     this.sinceLandMs += deltaMs;
     this.facing = moveToward(this.facing, this.facingTarget, deltaMs, 2 / TURN_MS);
     if (this.sinking) this.sink = moveToward(this.sink, 1, deltaMs, 1 / 160);
+    if (this.collapsing) this.fall = moveToward(this.fall, 1, deltaMs, 1 / 650);
+    this.flashMs += deltaMs;
 
     // The bump moves the whole body (sprite and shadow); the hop lifts only the sprite.
     let bumpX = 0;
@@ -105,10 +137,10 @@ export class HeroRig {
       stretchX *= 1 - 0.008 * breath;
       if (this.bump) {
         this.bump.ms += deltaMs;
-        const push = Math.sin(Math.PI * clamp01(this.bump.ms / BUMP_MS));
-        bumpX = this.bump.dx * BUMP_PIXELS * push;
-        bumpY = this.bump.dy * BUMP_PIXELS * push;
-        if (this.bump.ms >= BUMP_MS) this.bump = null;
+        const push = Math.sin(Math.PI * clamp01(this.bump.ms / this.bump.length));
+        bumpX = this.bump.dx * this.bump.pixels * push;
+        bumpY = this.bump.dy * this.bump.pixels * push;
+        if (this.bump.ms >= this.bump.length) this.bump = null;
       }
     }
 
@@ -122,8 +154,13 @@ export class HeroRig {
       this.baseScale * stretchX * this.facing * shrink,
       this.baseScale * stretchY * shrink,
     );
-    this.sprite.alpha = 1 - this.sink;
+    this.sprite.alpha = (1 - this.sink) * (1 - 0.45 * this.fall);
     this.shadow.alpha = 1 - this.sink;
+    // Slain: topples sideways and darkens.
+    this.sprite.rotation = this.fall * 1.2 * Math.sign(this.facing || 1);
+    const hurt = clamp01(1 - this.flashMs / FLASH_MS);
+    const base = this.fall > 0 ? mixColor(0xffffff, 0x8a3028, this.fall) : 0xffffff;
+    this.sprite.tint = mixColor(base, this.flashColor, hurt);
     this.shadow.scale.set(
       1 - 0.15 * (walking && !this.reducedMotion ? Math.sin((stepProgress ?? 0) * Math.PI) : 0),
     );

@@ -4,8 +4,6 @@ export const MAP_WIDTH = 32;
 export const MAP_HEIGHT = 16;
 export const MAP_SIZE = MAP_WIDTH * MAP_HEIGHT;
 export const FLOOR_COUNT = 30;
-/** How far the hero sees, in tiles (Euclidean). The lantern will vary this later. */
-export const SIGHT_RADIUS = 5;
 
 /** Tile kinds, stored as small numbers to keep save files compact. */
 export const Tile = {

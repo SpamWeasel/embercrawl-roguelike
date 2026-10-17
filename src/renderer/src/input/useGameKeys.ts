@@ -8,7 +8,10 @@ import {
 export interface GameKeyHandlers {
   move(direction: Direction): void;
   wait(): void;
+  /** Use whatever is underfoot: stairs or a camp. */
   interact(): void;
+  toggleLight(): void;
+  pulse(): void;
   menu(): void;
 }
 
@@ -137,6 +140,12 @@ export function useGameKeys(handlers: GameKeyHandlers, enabled: boolean): void {
       } else if (WAIT_KEYS.has(code)) {
         event.preventDefault();
         if (!event.repeat) latest.current.wait();
+      } else if (code === "KeyL") {
+        event.preventDefault();
+        if (!event.repeat) latest.current.toggleLight();
+      } else if (code === "KeyF") {
+        event.preventDefault();
+        if (!event.repeat) latest.current.pulse();
       } else if (code === "Escape") {
         event.preventDefault();
         if (!event.repeat) latest.current.menu();

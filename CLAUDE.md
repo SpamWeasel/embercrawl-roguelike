@@ -28,7 +28,16 @@ The owner is new to development tooling. Explain setup steps and trade-offs plai
   the view's `StepQueue` speeds up to catch up. Walking pace lives in `game/timing.ts`.
 - Every animation must respect `prefers-reduced-motion` (no bob, shake, particles; shorter steps).
 - **Saves must never break:** every save-format change bumps the format version, adds an upgrade
-  step and adds a test that loads the previous format.
+  step and adds a test that loads the previous format. Capture a genuine fixture from the old
+  engine *before* changing it (see `tests/fixtures/character-v1.json`); fixtures are never
+  reformatted (Biome ignores `tests/fixtures`).
+- **Balance numbers** live only in `src/engine/rules.ts`. Floor generation draws the layout and
+  stairs before camps and creatures, so adding content never changes a floor's shape.
+- **Lore:** Emberdepths' buried-observatory setting, retold in Embercrawl's own words
+  (`src/renderer/src/game/lore.ts`). Creature names stay as in Emberdepths so the owner's art maps
+  to them; descriptions are Embercrawl's own (`src/engine/creatures.ts`).
+- **Creature art** is picked up by file name: `src/renderer/src/assets/sprites/creatures/<id>.png`
+  (transparent PNG, ideally 128×128) replaces that creature's generated placeholder.
 - **Golden RNG values** in `tests/engine/rng.test.ts` change every dungeon from every seed. Only
   update them as a deliberate, stated decision.
 - **Security:** the game window reaches the PC only through `src/shared/bridge.ts` and
@@ -47,7 +56,7 @@ The owner is new to development tooling. Explain setup steps and trade-offs plai
 | `pnpm format` | Biome auto-format and import sorting |
 | `pnpm smoke` | Builds, then launches the title and game screens with throwaway saves; screenshots and reports in `.smoke/`; fails on console errors |
 | `node scripts/smoke.mjs <path\to\Embercrawl.exe>` | Same check against a packaged build |
-| `pnpm exec tsx scripts/demo-saves.mts <folder> <floor>...` | Demo characters already on chosen floors, one user-data folder per floor |
+| `pnpm exec tsx scripts/demo-saves.mts <folder> [--showcase] <floor>...` | Demo characters already on chosen floors, one user-data folder per floor; `--showcase` gathers creatures around the hero |
 | `pnpm dist` | Installers in `release/<version>/` (x64 and ARM64) |
 | `node scripts/make-icon.mjs [source.png]` | Rebuilds `build/icon.png` and `build/icon.ico` |
 
@@ -96,14 +105,17 @@ The owner is new to development tooling. Explain setup steps and trade-offs plai
 
 ## Layout
 
-- `src/engine` — game rules (pure, seeded): map, generation, sight, paths, run state, save format
+- `src/engine` — game rules (pure, seeded): map, generation, sight, paths, `creatures` (roster),
+  `rules` (all balance numbers), `run` (actions, combat, creature turns, events), save format
 - `src/main` — Electron main process: window, save store (`save-store.ts`), smoke-test mode
 - `src/preload` — exposes `window.embercrawl`
 - `src/shared` — types shared across processes (`bridge.ts`)
-- `src/renderer/src` — React UI: `screens/`, `game/` (session, autosave, click-to-walk, timing),
-  `input/` (keyboard), `saves/` (desktop or browser storage), `render/` (PixiJS), `assets/sprites/`
-  (the owner's art)
-- `src/renderer/src/render/dungeon` — `DungeonView` (scene, frame loop, camera, light, transitions),
-  `HeroRig` (hero animation), `particles`, `textures`, `palettes`, and the pure, tested helpers
-  `motion` (step queue, easing), `camera` (offsets, crisp scale) and `lighting` (falloff, flicker)
+- `src/renderer/src` — React UI: `screens/` (`game/` holds the HUD meters, message log and
+  overlays), `game/` (session, autosave, click-to-walk, timing, message text, lore), `input/`
+  (keyboard), `saves/` (desktop or browser storage), `render/` (PixiJS), `assets/sprites/` (the
+  owner's art; `creatures/` is picked up by file name)
+- `src/renderer/src/render/dungeon` — `DungeonView` (scene, frame loop, camera, light, event
+  timing, transitions), `HeroRig` and `CreatureRig` (animation), `creatureArt` (art or
+  placeholders), `effects` (numbers, rings, shots), `particles`, `textures`, `palettes`, and the
+  pure, tested helpers `motion` (step queue, easing), `camera` and `lighting`
 - `tests/` — Vitest; `scripts/` — tooling; `build/` — installer resources; `docs/` — plan

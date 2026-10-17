@@ -52,11 +52,68 @@ export function createTileTextures(palette: FloorPalette): TileTextures {
   };
 }
 
+/** A camp: a ring of stones around a small fire, and the same camp gone to ash once used. */
+export function createCampTextures(): { lit: Texture; spent: Texture; destroy(): void } {
+  const draw = (fire: boolean) =>
+    pixelTexture(fire ? 31 : 32, (paint, random) => {
+      for (const [x, y] of [
+        [4, 10],
+        [5, 12],
+        [7, 13],
+        [9, 13],
+        [11, 12],
+        [12, 10],
+        [5, 8],
+        [11, 8],
+      ] as const) {
+        paint(x, y, "#6f6a66");
+        paint(x, y - 1, "#8e8882");
+      }
+      for (let x = 5; x <= 11; x++) paint(x, 11, "#5a3a22");
+      for (let x = 6; x <= 10; x++) paint(x, 10, "#6e4628");
+      if (fire) {
+        for (const [x, y, color] of [
+          [8, 5, "#ffe6a0"],
+          [7, 6, "#ffcf6a"],
+          [8, 6, "#fff2c8"],
+          [9, 6, "#ffb347"],
+          [6, 7, "#ff9a3c"],
+          [7, 7, "#ffcf6a"],
+          [8, 7, "#ffe6a0"],
+          [9, 7, "#ff9a3c"],
+          [10, 7, "#e0561a"],
+          [6, 8, "#e0561a"],
+          [7, 8, "#ff9a3c"],
+          [8, 8, "#ffcf6a"],
+          [9, 8, "#ff9a3c"],
+          [10, 8, "#e0561a"],
+          [7, 9, "#e0561a"],
+          [8, 9, "#ff9a3c"],
+          [9, 9, "#e0561a"],
+        ] as const) {
+          paint(x, y, color);
+        }
+      } else {
+        for (let x = 6; x <= 10; x++) paint(x, 9, random() < 0.3 ? "#a8452a" : "#4a4440");
+      }
+    });
+  const lit = draw(true);
+  const spent = draw(false);
+  return {
+    lit,
+    spent,
+    destroy: () => {
+      lit.destroy(true);
+      spent.destroy(true);
+    },
+  };
+}
+
 /**
  * Loads an image through an <img> element rather than fetch(), which the packaged app's file://
  * pages don't support.
  */
-async function loadImageTexture(url: string): Promise<Texture> {
+export async function loadImageTexture(url: string): Promise<Texture> {
   const image = new Image();
   image.src = url;
   await image.decode();

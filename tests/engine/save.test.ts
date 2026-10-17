@@ -1,6 +1,9 @@
+import { readFileSync } from "node:fs";
+import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 import { applyAction } from "../../src/engine/run";
 import {
+  beginDescent,
   type CharacterSave,
   newCharacter,
   normalizeCharacterName,
@@ -33,7 +36,12 @@ describe("character saves", () => {
     const save = sample();
     expect(save.name).toBe("Ash Walker");
     expect(save.run?.depth).toBe(1);
-    expect(save.record).toEqual({ descents: 1, deepestFloor: 1 });
+    expect(save.record).toEqual({
+      descents: 1,
+      deepestFloor: 1,
+      deaths: 0,
+      discovered: save.run?.discovered,
+    });
   });
 
   it("record the deepest floor reached", () => {
@@ -57,6 +65,8 @@ describe("character saves", () => {
       id: ID,
       name: "Ash Walker",
       depth: 1,
+      level: 1,
+      status: "active",
       deepestFloor: 1,
       playTimeMs: 0,
       createdAt: NOW,
@@ -112,6 +122,78 @@ describe("parseCharacterSave", () => {
 
   it("rejects ids that could be used as file paths", () => {
     expect(broken((s) => (s.id = "../../evil"))).toThrow(SaveFormatError);
+  });
+});
+
+describe("older save files", () => {
+  // A real version-1 save, written by the milestone-1 engine before combat existed.
+  const v1 = JSON.parse(
+    readFileSync(fileURLToPath(new URL("../fixtures/character-v1.json", import.meta.url)), "utf8"),
+  );
+
+  it("upgrade from version 1, keeping where the character was", () => {
+    expect(v1.version).toBe(1);
+    const save = parseCharacterSave(v1);
+    expect(save.version).toBe(2);
+    expect(save.name).toBe("Version One");
+    expect(save.run?.depth).toBe(2);
+    expect(save.run?.turn).toBe(24);
+    expect({ x: save.run?.hero.x, y: save.run?.hero.y }).toEqual({
+      x: v1.run.hero.x,
+      y: v1.run.hero.y,
+    });
+    expect(save.run?.floors.map((f) => f.explored)).toEqual(
+      v1.run.floors.map((f: { explored: boolean[] }) => f.explored),
+    );
+  });
+
+  it("give version-1 characters full health, a full lantern and empty explored floors", () => {
+    const save = parseCharacterSave(v1);
+    expect(save.run?.hero).toMatchObject({ hp: 30, maxHp: 30, level: 1, xp: 0, shield: 0 });
+    expect(save.run?.lantern).toEqual({ charge: 100, bright: false });
+    expect(save.run?.status).toBe("active");
+    for (const floor of save.run?.floors ?? []) {
+      expect(floor.monsters).toEqual([]);
+      expect(floor.camp).toBeNull();
+    }
+    expect(save.record).toMatchObject({ deaths: 0, discovered: [] });
+  });
+
+  it("keep playing after the upgrade, with creatures on newly reached floors", () => {
+    const save = parseCharacterSave(v1);
+    const run = save.run;
+    if (!run) throw new Error("Expected a run.");
+    const played = applyAction(run, { type: "wait" });
+    expect(played.tookTurn).toBe(true);
+    expect(
+      parseCharacterSave(
+        throughJson(updateCharacter(save, played.run, { now: NOW, playTimeMs: 1 })),
+      ).version,
+    ).toBe(2);
+  });
+});
+
+describe("dying and starting over", () => {
+  it("counts the death once and begins a fresh descent that keeps the bestiary", () => {
+    const save = sample();
+    const run = save.run;
+    if (!run) throw new Error("Expected a run.");
+    const dead = {
+      ...run,
+      status: "dead" as const,
+      killedBy: "cinder-mite" as const,
+      discovered: ["cinder-mite" as const],
+    };
+    const fallen = updateCharacter(save, dead, { now: NOW, playTimeMs: 10 });
+    expect(fallen.record.deaths).toBe(1);
+    expect(updateCharacter(fallen, dead, { now: NOW, playTimeMs: 11 }).record.deaths).toBe(1);
+    expect(summarizeCharacter(fallen).status).toBe("dead");
+
+    const again = beginDescent(fallen, 999, NOW);
+    expect(again.run?.status).toBe("active");
+    expect(again.run?.depth).toBe(1);
+    expect(again.record.descents).toBe(2);
+    expect(again.record.discovered).toContain("cinder-mite");
   });
 });
 

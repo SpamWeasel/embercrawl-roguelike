@@ -1,6 +1,7 @@
 // Lets PixiJS run under the packaged game's content security policy, which forbids eval().
 import "pixi.js/unsafe-eval";
 import { Application, Container, Graphics, Sprite, Texture } from "pixi.js";
+import { creatureKind, type Monster } from "../../../../engine/creatures";
 import type { Floor } from "../../../../engine/generate";
 import {
   DIRECTION_VECTORS,
@@ -17,19 +18,23 @@ import {
   MAP_SIZE,
   MAP_WIDTH,
   pointOf,
-  SIGHT_RADIUS,
   tileAt,
 } from "../../../../engine/map";
 import { findPath } from "../../../../engine/path";
+import { PULSE_RADIUS } from "../../../../engine/rules";
 import type { GameEvent, Hero } from "../../../../engine/run";
 import { STEP_MS } from "../../game/timing";
+import { CreatureRig } from "./CreatureRig";
 import { cameraOffset, crispScale, snapToPixel } from "./camera";
+import { type CreatureTextures, loadCreatureTextures } from "./creatureArt";
+import { EffectLayer } from "./effects";
 import { HeroRig } from "./HeroRig";
 import { flicker, lanternLevel, REMEMBERED_TINT, scaleColor, tileTint } from "./lighting";
 import { approach, clamp01, moveToward, StepQueue } from "./motion";
 import type { FloorPalette } from "./palettes";
 import { ParticleField } from "./particles";
 import {
+  createCampTextures,
   createTileTextures,
   loadSpriteTextures,
   type SpriteTextures,
@@ -52,8 +57,12 @@ const FADE_OUT_MS = 170;
 const FADE_IN_MS = 340;
 /** The camera covers half the distance to its target in this time. */
 const CAMERA_HALF_LIFE_MS = 55;
+/** The lantern's reach eases to its new size over about this half-life when toggled. */
+const LIGHT_HALF_LIFE_MS = 110;
 /** After this long with nothing moving, drawing drops to 30 frames a second to save power. */
 const IDLE_MS = 2000;
+/** Ranged shots take this long to fly. */
+const BOLT_MS = 150;
 
 /** Average number of lantern motes drifting around the hero. */
 const MOTE_COUNT = 14;
@@ -62,12 +71,19 @@ const EMBER_COLORS = [0xffd9a0, 0xffb066, 0xff8a3d] as const;
 
 const ROUTE_COLOR = 0xffa45c;
 const NO_ROUTE_COLOR = 0x8a8f9c;
+const DAMAGE_DEALT_COLOR = 0xfff1d6;
+const DAMAGE_TAKEN_COLOR = 0xff5a4a;
+const SHIELD_COLOR = 0x8fc8ff;
+const HEAL_COLOR = 0x8ff0a0;
+const LEVEL_COLOR = 0xffd45a;
 
 export interface DungeonModel {
   readonly floor: Floor;
   readonly palette: FloorPalette;
   readonly hero: Hero;
   readonly visible: ReadonlySet<number>;
+  /** How far the lantern reaches right now, in tiles. */
+  readonly sightRadius: number;
 }
 
 export interface DungeonViewOptions {
@@ -87,16 +103,27 @@ export class DungeonView {
   private readonly world = new Container();
   private readonly tiles: Sprite[] = [];
   private readonly stairs = new Container();
-  /** Dust stays under the hero; motes and embers float over it. */
-  private readonly ground = new ParticleField(160);
-  private readonly air = new ParticleField(240);
+  private readonly camp = new Sprite();
+  private readonly campGlow: Sprite;
+  /** Dust stays under the actors; motes and embers float over them. */
+  private readonly ground = new ParticleField(200);
+  private readonly air = new ParticleField(320);
   private readonly glow: Sprite;
   private readonly glowMask = new Graphics();
+  /** The hero and creatures, drawn nearest-last so they overlap naturally. */
+  private readonly actors = new Container();
   private readonly overlay = new Graphics();
   private readonly fade = new Graphics();
+  private readonly effects: EffectLayer;
   private readonly hero: HeroRig;
   private readonly steps: StepQueue;
+  private readonly stepMs: number;
   private readonly reducedMotion: boolean;
+  private readonly campTextures = createCampTextures();
+  private readonly rigs = new Map<string, CreatureRig>();
+  private monstersById = new Map<string, Monster>();
+  /** Small delays so a strike plays after the step that provoked it. */
+  private timers: Array<{ at: number; run: () => void }> = [];
 
   /** Solid rock with no open neighbor is never drawn. */
   private readonly bedrock = new Uint8Array(MAP_SIZE);
@@ -118,6 +145,7 @@ export class DungeonView {
   private transition: Transition | null = null;
   private hover: Point | null = null;
   private display: Point = { x: 0, y: 0 };
+  private lightRadius = 4;
   private scale = 1;
   private camera = { x: 0, y: 0, ready: false };
   private shake = 0;
@@ -129,10 +157,12 @@ export class DungeonView {
   private constructor(
     private readonly app: Application,
     private readonly sprites: SpriteTextures,
+    private readonly creatureTextures: CreatureTextures,
     options: DungeonViewOptions,
   ) {
     this.reducedMotion = options.reducedMotion;
-    this.steps = new StepQueue(this.display, options.reducedMotion ? REDUCED_STEP_MS : STEP_MS);
+    this.stepMs = options.reducedMotion ? REDUCED_STEP_MS : STEP_MS;
+    this.steps = new StepQueue(this.display, this.stepMs);
 
     for (let index = 0; index < MAP_SIZE; index++) {
       // Textures (and so sizes) are assigned in buildFloor, once the palette is known.
@@ -149,16 +179,27 @@ export class DungeonView {
     this.glow.blendMode = "add";
     // The warm glow only lands on tiles the hero can actually see, never through walls.
     this.glow.mask = this.glowMask;
+    this.campGlow = new Sprite(this.glow.texture);
+    this.campGlow.anchor.set(0.5);
+    this.campGlow.blendMode = "add";
+    this.camp.visible = false;
+    this.campGlow.visible = false;
+    this.actors.sortableChildren = true;
+    this.actors.addChild(this.hero.container);
+    this.effects = new EffectLayer((p) => this.world.toGlobal(p), this.glow.texture);
     this.world.addChild(
       this.stairs,
+      this.camp,
       this.ground.container,
       this.glowMask,
       this.glow,
-      this.hero.container,
+      this.campGlow,
+      this.actors,
+      this.effects.world,
       this.air.container,
       this.overlay,
     );
-    app.stage.addChild(this.world, this.fade);
+    app.stage.addChild(this.world, this.effects.screen, this.fade);
 
     app.stage.eventMode = "static";
     app.stage.hitArea = app.screen;
@@ -188,9 +229,12 @@ export class DungeonView {
       preference: "webgl",
     });
     try {
-      const sprites = await loadSpriteTextures();
+      const [sprites, creatures] = await Promise.all([
+        loadSpriteTextures(),
+        loadCreatureTextures(),
+      ]);
       host.appendChild(app.canvas);
-      return new DungeonView(app, sprites, options);
+      return new DungeonView(app, sprites, creatures, options);
     } catch (error) {
       app.destroy(true);
       throw error;
@@ -214,7 +258,9 @@ export class DungeonView {
       return;
     }
     if (model.floor.tiles !== this.builtTiles || model.palette !== this.builtPalette) {
+      // A different floor without stairs (a new descent): fade it in.
       this.applyFloor(model);
+      this.transition = { phase: "in", ms: 0 };
       return;
     }
     this.model = model;
@@ -225,6 +271,8 @@ export class DungeonView {
       this.expectedHero = model.hero;
     }
     this.hero.face(model.hero.facing);
+    this.syncCreatures(model.floor.monsters, false);
+    this.drawCamp(model.floor);
     this.drawGlowMask(model.visible);
     this.drawOverlay();
   }
@@ -232,6 +280,9 @@ export class DungeonView {
   /** Plays what just happened in the game as animation. */
   handleEvents(events: readonly GameEvent[]): void {
     this.markActive();
+    let heroStepped = false;
+    /** Creature strikes start once the hero's own move has landed, and stagger after each other. */
+    let strikeAt = 0;
     for (const event of events) {
       switch (event.type) {
         case "moved":
@@ -239,6 +290,7 @@ export class DungeonView {
           this.steps.push({ from: event.from, to: event.to });
           this.expectedHero = event.to;
           this.footstepDust(event.from, event.direction);
+          heroStepped = true;
           break;
         case "blocked": {
           const { x, y } = DIRECTION_VECTORS[event.direction];
@@ -247,12 +299,97 @@ export class DungeonView {
           if (!this.reducedMotion) this.shake = Math.max(this.shake, 1.6);
           break;
         }
+        case "attacked": {
+          const { x, y } = DIRECTION_VECTORS[event.direction];
+          this.hero.lunge(x, y);
+          this.later(70, () => {
+            this.rigs.get(event.target)?.flash();
+            this.effects.number(
+              this.centerOf(event.at, 0.4),
+              String(event.damage),
+              DAMAGE_DEALT_COLOR,
+            );
+            this.sparks(event.at, 0xfff0c8, 8);
+          });
+          strikeAt = Math.max(strikeAt, 170);
+          break;
+        }
+        case "monster-died": {
+          const rig = this.rigs.get(event.id);
+          if (rig) rig.doomed = true;
+          this.later(120, () => {
+            rig?.die();
+            this.sparks(event.at, creatureKind(event.kind).color, 16);
+            this.effects.number(this.centerOf(event.at, 0.8), `+${event.xp} xp`, LEVEL_COLOR);
+          });
+          break;
+        }
+        case "monster-moved": {
+          const rig = this.rigs.get(event.id);
+          if (!rig) break;
+          rig.steps.push({ from: event.from, to: event.to });
+          rig.expected = event.to;
+          break;
+        }
+        case "monster-noticed":
+          this.rigs.get(event.id)?.noticed();
+          break;
+        case "monster-struck": {
+          const delay = Math.max(strikeAt, heroStepped ? this.stepMs * 0.6 : 40);
+          strikeAt = delay + 140;
+          const rig = this.rigs.get(event.id);
+          const hurt = () => this.heroHurt(event.damage, event.absorbed);
+          this.later(delay, () => {
+            const heroAt = this.expectedHero ?? event.from;
+            rig?.strikeToward(heroAt, event.from);
+            if (event.ranged) {
+              this.effects.bolt(
+                this.centerOf(event.from, 0.55),
+                this.centerOf(heroAt, 0.55),
+                creatureKind(event.kind).color,
+                BOLT_MS,
+                hurt,
+              );
+            } else {
+              this.later(80, hurt);
+            }
+          });
+          break;
+        }
+        case "leveled-up":
+          this.later(260, () => this.levelUpBurst(event.level));
+          break;
+        case "pulsed":
+          this.pulseWave(event.at);
+          break;
+        case "rested":
+          this.later(60, () => {
+            const at = this.expectedHero ?? this.display;
+            if (event.healed > 0)
+              this.effects.number(this.centerOf(at, 0.9), `+${event.healed}`, HEAL_COLOR);
+            this.sparks(at, HEAL_COLOR, 12, true);
+            this.hero.flash(HEAL_COLOR);
+          });
+          break;
+        case "lantern":
+          if (event.bright) this.sparks(this.expectedHero ?? this.display, 0xffe2a0, 10, true);
+          break;
+        case "died":
+          this.later(strikeAt + 160, () => {
+            this.hero.collapse();
+            if (!this.reducedMotion) this.shake = Math.max(this.shake, 4);
+          });
+          break;
         case "changed-floor":
           this.transition = { phase: "out", ms: 0 };
           this.hero.startSink();
           break;
         case "waited":
         case "no-stairs":
+        case "monster-readied":
+        case "spotted":
+        case "not-enough-charge":
+        case "camp-spent":
           break;
       }
     }
@@ -261,10 +398,13 @@ export class DungeonView {
   destroy(): void {
     this.ground.destroy();
     this.air.destroy();
+    this.effects.clear();
     const glowTexture = this.glow.texture;
     this.app.destroy({ removeView: true }, { children: true });
     glowTexture.destroy(true);
     this.sprites.destroy();
+    this.creatureTextures.destroy();
+    this.campTextures.destroy();
     for (const textures of this.tileTextures.values()) textures.destroy();
     this.tileTextures.clear();
   }
@@ -276,18 +416,28 @@ export class DungeonView {
     const model = this.model;
     if (!model) return;
 
+    this.runTimers();
     this.advanceTransition(deltaMs);
     const frame = this.steps.update(deltaMs);
     if (frame.landed && !frame.chained) this.hero.landed();
     this.display = frame.position;
+    this.lightRadius = approach(this.lightRadius, model.sightRadius, deltaMs, LIGHT_HALF_LIFE_MS);
     const seconds = this.elapsedMs / 1000;
     this.hero.update(deltaMs, seconds, this.display, frame.progress);
+    this.hero.container.zIndex = this.hero.container.y + 0.5;
+    this.updateCreatures(deltaMs, seconds);
     this.updateLight(deltaMs, seconds);
     this.updateParticles(deltaMs);
     this.updateCamera(deltaMs);
+    this.effects.update(deltaMs);
 
-    if (this.steps.busy || this.transition || this.shake > 0.05)
-      this.lastActivityMs = this.elapsedMs;
+    const busy =
+      this.steps.busy ||
+      this.transition !== null ||
+      this.shake > 0.05 ||
+      this.timers.length > 0 ||
+      [...this.rigs.values()].some((rig) => rig.steps.busy || rig.dying);
+    if (busy) this.lastActivityMs = this.elapsedMs;
     const wantedFps = this.elapsedMs - this.lastActivityMs > IDLE_MS ? 30 : 0;
     if (this.app.ticker.maxFPS !== wantedFps) this.app.ticker.maxFPS = wantedFps;
   }
@@ -300,6 +450,18 @@ export class DungeonView {
     }
   }
 
+  private later(delayMs: number, run: () => void): void {
+    this.timers.push({ at: this.elapsedMs + delayMs, run });
+  }
+
+  private runTimers(): void {
+    if (this.timers.length === 0) return;
+    const due = this.timers.filter((t) => t.at <= this.elapsedMs);
+    if (due.length === 0) return;
+    this.timers = this.timers.filter((t) => t.at > this.elapsedMs);
+    for (const timer of due) timer.run();
+  }
+
   /** Builds a floor's tiles and jumps straight to its current state (used on arrival). */
   private applyFloor(model: DungeonModel): void {
     this.buildFloor(model.floor, model.palette);
@@ -310,10 +472,16 @@ export class DungeonView {
     this.steps.snap(model.hero);
     this.expectedHero = model.hero;
     this.display = model.hero;
+    this.lightRadius = model.sightRadius;
+    this.hero.reset();
     this.hero.face(model.hero.facing, true);
     this.camera.ready = false;
+    this.timers = [];
     this.ground.clear();
     this.air.clear();
+    this.effects.clear();
+    this.syncCreatures(model.floor.monsters, true);
+    this.drawCamp(model.floor);
     this.drawGlowMask(model.visible);
     this.drawOverlay();
   }
@@ -322,6 +490,60 @@ export class DungeonView {
     for (let index = 0; index < MAP_SIZE; index++) {
       this.sightTarget[index] = visible.has(index) ? 1 : 0;
       this.revealTarget[index] = floor.explored[index] || visible.has(index) ? 1 : 0;
+    }
+  }
+
+  /** Matches creature rigs to the creatures in the game state. `rebuild` starts fresh (new floor). */
+  private syncCreatures(monsters: readonly Monster[], rebuild: boolean): void {
+    if (rebuild) {
+      for (const rig of this.rigs.values()) rig.container.destroy({ children: true });
+      this.rigs.clear();
+    }
+    this.monstersById = new Map(monsters.map((m) => [m.id, m]));
+    for (const monster of monsters) {
+      let rig = this.rigs.get(monster.id);
+      if (!rig) {
+        rig = new CreatureRig(
+          monster,
+          this.creatureTextures.get(monster.kind),
+          this.stepMs,
+          this.reducedMotion,
+        );
+        this.rigs.set(monster.id, rig);
+        this.actors.addChild(rig.container);
+      }
+      if (!samePoint(rig.expected, monster)) {
+        rig.steps.snap(monster);
+        rig.expected = { x: monster.x, y: monster.y };
+      }
+      rig.face(monster.facing);
+    }
+    for (const [id, rig] of this.rigs) {
+      if (this.monstersById.has(id) || rig.doomed) continue;
+      rig.container.destroy({ children: true });
+      this.rigs.delete(id);
+    }
+  }
+
+  private updateCreatures(deltaMs: number, seconds: number): void {
+    for (const [id, rig] of this.rigs) {
+      const monster = this.monstersById.get(id);
+      const frame = rig.steps.update(deltaMs);
+      const tile = monster ?? rig.expected;
+      const visibility = this.sight[indexOf(tile)] ?? 0;
+      const alive = rig.update(
+        deltaMs,
+        seconds,
+        frame.position,
+        frame.progress,
+        visibility,
+        monster,
+      );
+      rig.container.zIndex = rig.container.y;
+      if (!alive) {
+        rig.container.destroy({ children: true });
+        this.rigs.delete(id);
+      }
     }
   }
 
@@ -360,9 +582,21 @@ export class DungeonView {
     }
   }
 
+  private drawCamp(floor: Floor): void {
+    const camp = floor.camp;
+    this.camp.visible = camp !== null;
+    this.campGlow.visible = camp !== null && !floor.campUsed;
+    if (!camp) return;
+    this.camp.texture = floor.campUsed ? this.campTextures.spent : this.campTextures.lit;
+    this.camp.position.set(camp.x * TILE_PIXELS, camp.y * TILE_PIXELS);
+    this.camp.setSize(TILE_PIXELS, TILE_PIXELS);
+    this.campGlow.position.set((camp.x + 0.5) * TILE_PIXELS, (camp.y + 0.55) * TILE_PIXELS);
+  }
+
   /** Fades tiles in and out of sight and lights them from where the hero is drawn right now. */
   private updateLight(deltaMs: number, seconds: number): void {
     const strength = flicker(seconds, this.reducedMotion ? 0.3 : 1);
+    const radius = this.lightRadius;
     const { x: hx, y: hy } = this.display;
     for (let index = 0; index < MAP_SIZE; index++) {
       const sprite = this.tiles[index] as Sprite;
@@ -392,7 +626,7 @@ export class DungeonView {
         continue;
       }
       const distance = Math.hypot((index % MAP_WIDTH) - hx, Math.floor(index / MAP_WIDTH) - hy);
-      sprite.tint = tileTint(sight, lanternLevel(distance, SIGHT_RADIUS) * strength);
+      sprite.tint = tileTint(sight, lanternLevel(distance, radius) * strength);
     }
     for (const mark of this.stairs.children as Sprite[]) {
       const tile = this.tiles[Number(mark.label)] as Sprite;
@@ -400,10 +634,20 @@ export class DungeonView {
       mark.alpha = tile.alpha;
       mark.tint = tile.tint;
     }
-    const diameter = (SIGHT_RADIUS * 2 + 1) * TILE_PIXELS;
+    const camp = this.model?.floor.camp;
+    if (camp && this.camp.visible) {
+      const tile = this.tiles[indexOf(camp)] as Sprite;
+      this.camp.alpha = tile.visible ? tile.alpha : 0;
+      this.camp.tint = tile.tint;
+      const campFlicker = flicker(seconds * 1.7 + 3, this.reducedMotion ? 0.3 : 1.6);
+      this.campGlow.setSize(TILE_PIXELS * 2.6 * campFlicker);
+      this.campGlow.alpha = (this.sight[indexOf(camp)] ?? 0) * 0.55 * campFlicker;
+    }
+    const bright = (this.model?.sightRadius ?? 4) > 4;
+    const diameter = (radius * 2 + 1) * TILE_PIXELS;
     this.glow.position.set((hx + 0.5) * TILE_PIXELS, (hy + 0.5) * TILE_PIXELS);
     this.glow.setSize(diameter * (0.97 + 0.03 * strength));
-    this.glow.alpha = clamp01(0.5 * strength);
+    this.glow.alpha = clamp01((bright ? 0.62 : 0.5) * strength);
   }
 
   private updateParticles(deltaMs: number): void {
@@ -415,7 +659,7 @@ export class DungeonView {
     ) {
       // A mote somewhere in the lantern's reach, rising slowly.
       const angle = Math.random() * Math.PI * 2;
-      const reach = Math.sqrt(Math.random()) * SIGHT_RADIUS * 0.85 * TILE_PIXELS;
+      const reach = Math.sqrt(Math.random()) * this.lightRadius * 0.85 * TILE_PIXELS;
       this.air.emit({
         shape: "dot",
         glow: true,
@@ -433,7 +677,7 @@ export class DungeonView {
     this.air.update(seconds);
   }
 
-  /** Eases the camera after the hero, with a little shake after bumps. */
+  /** Eases the camera after the hero, with a little shake after bumps and blows. */
   private updateCamera(deltaMs: number): void {
     const { width, height } = this.app.screen;
     const tile = TILE_PIXELS * this.scale;
@@ -497,6 +741,66 @@ export class DungeonView {
     this.world.scale.set(this.scale);
     this.fade.clear().rect(0, 0, width, height).fill(0x000000);
     this.drawOverlay();
+  }
+
+  /** A tile's center in world pixels, raised by `lift` tiles (e.g. a creature's chest). */
+  private centerOf(tile: Point, lift = 0.5): Point {
+    return { x: (tile.x + 0.5) * TILE_PIXELS, y: (tile.y + 1 - lift) * TILE_PIXELS };
+  }
+
+  private heroHurt(damage: number, absorbed: number): void {
+    const at = this.centerOf(this.expectedHero ?? this.display, 0.75);
+    const lost = damage - absorbed;
+    if (absorbed > 0) this.effects.number({ x: at.x - 5, y: at.y }, `-${absorbed}`, SHIELD_COLOR);
+    if (lost > 0)
+      this.effects.number(
+        { x: at.x + (absorbed > 0 ? 5 : 0), y: at.y },
+        `-${lost}`,
+        DAMAGE_TAKEN_COLOR,
+      );
+    this.hero.flash(lost > 0 ? DAMAGE_TAKEN_COLOR : SHIELD_COLOR);
+    this.sparks(this.expectedHero ?? this.display, lost > 0 ? 0xff7a5a : SHIELD_COLOR, 7);
+    if (!this.reducedMotion) this.shake = Math.max(this.shake, 1.8 + Math.min(3, lost * 0.25));
+  }
+
+  private levelUpBurst(level: number): void {
+    const at = this.expectedHero ?? this.display;
+    const center = this.centerOf(at, 0.5);
+    this.effects.ring(center, TILE_PIXELS * 1.6, LEVEL_COLOR, 520);
+    this.effects.number(this.centerOf(at, 1.1), `Level ${level}!`, LEVEL_COLOR, true);
+    this.sparks(at, LEVEL_COLOR, 22, true);
+    this.hero.flash(LEVEL_COLOR);
+  }
+
+  private pulseWave(at: Point): void {
+    this.effects.ring(this.centerOf(at, 0.5), (PULSE_RADIUS + 0.6) * TILE_PIXELS, 0xffc070, 380);
+    this.effects.ring(this.centerOf(at, 0.5), (PULSE_RADIUS + 0.2) * TILE_PIXELS, 0xff8a3d, 300);
+    this.sparks(at, 0xffd9a0, 24, true);
+    if (!this.reducedMotion) this.shake = Math.max(this.shake, 1.2);
+  }
+
+  /** A burst of sparks from a tile; `rise` makes them float up instead of scattering. */
+  private sparks(tile: Point, color: number, count: number, rise = false): void {
+    if (this.reducedMotion) return;
+    const center = this.centerOf(tile, 0.5);
+    for (let i = 0; i < count; i++) {
+      const angle = Math.random() * Math.PI * 2;
+      const speed = 18 + Math.random() * 34;
+      this.air.emit({
+        shape: rise ? "dot" : "pixel",
+        glow: true,
+        x: center.x + (Math.random() * 4 - 2),
+        y: center.y + (Math.random() * 4 - 2),
+        vx: Math.cos(angle) * speed * (rise ? 0.4 : 1),
+        vy: rise ? -14 - Math.random() * 26 : Math.sin(angle) * speed,
+        gravity: rise ? 4 : 30,
+        drag: 3.5,
+        life: 0.35 + Math.random() * (rise ? 0.6 : 0.25),
+        size: rise ? 1.6 + Math.random() * 1.6 : 0.9 + Math.random() * 0.7,
+        color,
+        alpha: 0.95,
+      });
+    }
   }
 
   private footstepDust(from: Point, direction: Direction): void {
