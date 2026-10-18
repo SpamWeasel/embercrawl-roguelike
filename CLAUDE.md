@@ -2,7 +2,8 @@
 
 An original turn-based roguelike for Windows PCs: Electron + PixiJS (dungeon) + React (UI). The
 approved plan, decisions and milestones are in `docs/PLAN.md`; read it before larger changes and
-update it when a decision changes.
+update it when a decision changes. `docs/DEVELOPMENT_GUIDE.md` explains every mechanic with its
+numbers and where it lives; update it whenever a rule, number or file it mentions changes.
 
 The owner is new to development tooling. Explain setup steps and trade-offs plainly.
 

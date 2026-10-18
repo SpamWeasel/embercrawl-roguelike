@@ -15,5 +15,5 @@ pnpm dev
 ```
 
 `pnpm check` runs the type checks, linter and tests. `pnpm dist` builds installers into
-`release/`. See `docs/PLAN.md` for the design and roadmap, and `CLAUDE.md` for project rules and
-all commands.
+`release/`. See `docs/PLAN.md` for the design and roadmap, `docs/DEVELOPMENT_GUIDE.md` for how
+every mechanic works and how to tune it, and `CLAUDE.md` for project rules and all commands.
