@@ -94,6 +94,24 @@ art matches; descriptions are new.
 - The owner's nine item pictures are used; the rest have drawn pixel-art placeholders until art
   arrives (drop `<item id>.png` into `assets/sprites/items/`).
 
+**Built in milestone 5** (shops and gold added at the owner's request; Emberdepths had no shops):
+- **Gold:** piles on every floor, coins from every creature slain (fixed per creature), and a
+  guardian's hoard. Gold goes straight to the purse, shown in the top bar.
+- **Merchants** keep a warded stall on floors 3, 6 … 27, selling four supplies and a weapon and
+  armor from a little deeper, and buying items back at 40% of their price. Prices rise 8% a floor.
+- **Guardians** on floors 10 and 20 seal the stairs down until they fall, then leave gold and
+  gear from deeper down.
+- **The ending:** floor 30 holds the Beacon at its far end. With the Beacon Warden slain, the hero
+  rekindles it and the descent is won: a victory screen, and the character's record counts wins.
+- **The balance bot** (`src/bot/bot.ts`, `pnpm balance`) plays whole descents with a fixed, simple
+  strategy. Tuned to the target: 30.7% wins on 300 tuning seeds, 33.0% on 300 separate check
+  seeds, with losses spread across the descent (most at the guardians and the finale). Tuning
+  changed creature health growth (8% → 10.5% a floor), creature attack (× 0.9 → × 1.02), the
+  deepest creatures' attacks (lowered), kill gold and prices.
+- **Minimap**, **how to play** (title screen, menu and H), and the **version** on the title screen.
+- Saves move to format 4, with an upgrade from format 3 tested against a genuine version-3 save.
+- Not built yet from this milestone's plan: achievements and run history.
+
 ## 2. Diagonal movement
 
 - Hero and monsters move in 8 directions. A diagonal step costs one turn, like any other.
@@ -192,6 +210,8 @@ Embercrawl.exe (Electron)
   sheets as overlays above the dungeon.
 - Mouse: click to move, hover tooltips for creatures and items, gear comparisons (built in
   milestone 4).
+- A minimap in the top right corner: small, large or hidden (M), clickable to walk (built in
+  milestone 5, added at the owner's request).
 - Keyboard-first with remappable keys; Xbox and PlayStation controller support.
 - Windowed, fullscreen and borderless; any resolution and aspect ratio; UI scale setting.
 - Pause menu, settings, and an automatic save on quit.
@@ -246,7 +266,7 @@ Embercrawl.exe (Electron)
 | 2 ✅ | **Feel pass:** smooth motion, camera, lantern lighting, particles, input queuing, fullscreen and scaling | Judge the feel early |
 | 3 ✅ | Combat and creatures: behaviors adapted to 8-way, leveling, death, the lantern, camps, combat effects (sparks, damage numbers, dissolves, pulse shockwave) | Fight |
 | 4 ✅ | Items and inventory (healing, gear, traps), tooltips and comparisons | Gear up |
-| 5 | Full descent: 30 floors of content, guardians, shops, victory; bot re-tuned to 25–35% | Play a whole run |
+| 5 ✅ | Full descent: 30 floors of content, guardians, shops, victory; bot re-tuned to 25–35% | Play a whole run |
 | 6 | Characters, saves and settings: character select, export/import, backups, file association, key remapping, gamepad | Manage characters and move saves between PCs |
 | 7 | Art and audio pass | |
 | 8 | Release prep: signed installers, store page (itch.io or Steam), auto-update | Share it with players |

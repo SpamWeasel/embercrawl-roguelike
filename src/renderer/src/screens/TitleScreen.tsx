@@ -11,6 +11,7 @@ import { formatPlayTime, formatWhen } from "../format";
 import { EmberField } from "../render/EmberField";
 import { readableError, savesAreLocalToBrowser } from "../saves/saveService";
 import { useBuildLabel } from "../useBuildLabel";
+import { HelpCard } from "./game/Overlays";
 
 const FIRST_CHARACTER_NAME = "Wanderer";
 
@@ -18,6 +19,7 @@ const FIRST_CHARACTER_NAME = "Wanderer";
 function describeProgress(summary: CharacterSummary): string {
   if (summary.status === "none" || summary.depth === null) return "Between descents";
   if (summary.status === "dead") return `Fell on floor ${summary.depth}`;
+  if (summary.status === "won") return "Rekindled the Beacon";
   return `Level ${summary.level ?? 1} · Floor ${summary.depth} of ${FLOOR_COUNT}`;
 }
 
@@ -42,6 +44,7 @@ export function TitleScreen({ saves, autoContinue, onPlay, onReady }: TitleScree
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [name, setName] = useState("");
+  const [helpOpen, setHelpOpen] = useState(false);
   const buildLabel = useBuildLabel();
   // Shared across StrictMode's double effect run, so the first character is only created once.
   const loading = useRef<Promise<CharacterListing[]> | null>(null);
@@ -114,6 +117,7 @@ export function TitleScreen({ saves, autoContinue, onPlay, onReady }: TitleScree
           <h1 className="title-ember font-display text-7xl font-bold tracking-[0.08em]">
             Embercrawl
           </h1>
+          <p className="mt-1 font-mono text-xs text-bone/50">Version {__APP_VERSION__}</p>
         </header>
 
         <section className="panel p-5" aria-labelledby="characters-heading">
@@ -140,6 +144,7 @@ export function TitleScreen({ saves, autoContinue, onPlay, onReady }: TitleScree
                     <span className="text-xs text-bone/60">
                       {describeProgress(listing.summary)}
                       {" · "}deepest {listing.summary.deepestFloor}
+                      {listing.summary.wins > 0 && ` · ${listing.summary.wins} won`}
                       {" · "}
                       {formatPlayTime(listing.summary.playTimeMs)} played
                       {" · "}
@@ -182,6 +187,9 @@ export function TitleScreen({ saves, autoContinue, onPlay, onReady }: TitleScree
               {error}
             </p>
           )}
+          <button type="button" className="btn btn-small mt-3" onClick={() => setHelpOpen(true)}>
+            How to play
+          </button>
           {savesAreLocalToBrowser && (
             <p className="mt-3 text-xs text-bone/45">
               Browser preview: characters are saved in this browser only.
@@ -193,6 +201,7 @@ export function TitleScreen({ saves, autoContinue, onPlay, onReady }: TitleScree
       <footer className="absolute right-4 bottom-3 z-10 font-mono text-[11px] text-bone/45">
         {buildLabel}
       </footer>
+      {helpOpen && <HelpCard onClose={() => setHelpOpen(false)} />}
     </main>
   );
 }

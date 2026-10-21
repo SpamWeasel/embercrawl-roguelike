@@ -3,6 +3,7 @@ import { creatureKind, type Monster } from "../../../../engine/creatures";
 import type { Point } from "../../../../engine/geometry";
 import {
   CACHE,
+  GOLD,
   isSupply,
   itemKind,
   type LootId,
@@ -16,18 +17,22 @@ import {
   currentFloor,
   itemAt,
   knownTrapAt,
+  livingGuardian,
   type RunState,
   visibleTiles,
 } from "../../../../engine/run";
 import {
+  BEACON_TEXT,
   BEHAVIOR_TEXT,
   CACHE_NAME,
   categoryLabel,
   creatureOutlook,
   effectLine,
   type GearComparison,
+  GOLD_NAME,
   gearComparison,
   lootDescription,
+  MERCHANT_TEXT,
   range,
   supplyOutlook,
   trapEffect,
@@ -84,7 +89,30 @@ function Heading({ title, kind, icon }: { title: string; kind: string; icon?: Re
 }
 
 /** An item's name, what it does and, for gear, how it compares with what's worn. */
-export function ItemDetails({ id, run, count }: { id: LootId; run: RunState; count?: number }) {
+export function ItemDetails({
+  id,
+  run,
+  count,
+  amount,
+}: {
+  id: LootId;
+  run: RunState;
+  count?: number;
+  /** Coins in a gold pile. */
+  amount?: number;
+}) {
+  if (id === GOLD) {
+    return (
+      <div className="flex flex-col gap-1.5">
+        <Heading
+          title={amount ? `${amount} gold` : GOLD_NAME}
+          kind="Coins"
+          icon={<ItemIcon id={id} size={40} className="item-frame" />}
+        />
+        <p className="tooltip-text">{lootDescription(id)}</p>
+      </div>
+    );
+  }
   if (id === CACHE) {
     return (
       <div className="flex flex-col gap-1.5">
@@ -215,7 +243,7 @@ export function TileTooltip({ run, tile }: { run: RunState; tile: Point }) {
     : undefined;
   if (monster) parts.push(<CreatureDetails key="creature" monster={monster} run={run} />);
   const item = itemAt(run, tile);
-  if (item) parts.push(<ItemDetails key="item" id={item.item} run={run} />);
+  if (item) parts.push(<ItemDetails key="item" id={item.item} run={run} amount={item.amount} />);
   const trap = knownTrapAt(run, tile);
   if (trap) parts.push(<TrapDetails key="trap" trap={trap} />);
   if (floor.camp && floor.camp.x === tile.x && floor.camp.y === tile.y) {
@@ -230,9 +258,42 @@ export function TileTooltip({ run, tile }: { run: RunState; tile: Point }) {
       </div>,
     );
   }
+  if (floor.merchant && floor.merchant.x === tile.x && floor.merchant.y === tile.y) {
+    parts.push(
+      <div key="merchant" className="flex flex-col gap-1">
+        <Heading title="Merchant" kind="Stall · warded" />
+        <p className="tooltip-text">{MERCHANT_TEXT}</p>
+        <p className="text-[13px] text-bone">Stand here and press Enter to trade.</p>
+      </div>,
+    );
+  }
+  if (floor.beacon && floor.beacon.x === tile.x && floor.beacon.y === tile.y) {
+    const warden = livingGuardian(floor);
+    parts.push(
+      <div key="beacon" className="flex flex-col gap-1">
+        <Heading title="The Beacon" kind={run.status === "won" ? "Rekindled" : "Guttering"} />
+        <p className="tooltip-text">{BEACON_TEXT}</p>
+        {warden && run.status !== "won" && (
+          <p className="text-[13px] text-[#ff9c8a]">
+            The {creatureKind(warden.kind).name} still stands.
+          </p>
+        )}
+      </div>,
+    );
+  }
   const ground = tileAt(floor.tiles, tile);
   if (ground === Tile.StairsDown && run.depth < FLOOR_COUNT) {
-    parts.push(<Heading key="down" title="Stairs down" kind={`To floor ${run.depth + 1}`} />);
+    const guardian = livingGuardian(floor);
+    parts.push(
+      <div key="down" className="flex flex-col gap-1">
+        <Heading title="Stairs down" kind={`To floor ${run.depth + 1}`} />
+        {guardian && (
+          <p className="text-[13px] text-[#ff9c8a]">
+            Sealed until the {creatureKind(guardian.kind).name} falls.
+          </p>
+        )}
+      </div>,
+    );
   } else if (ground === Tile.StairsUp && run.depth > 1) {
     parts.push(<Heading key="up" title="Stairs up" kind={`To floor ${run.depth - 1}`} />);
   }

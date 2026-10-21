@@ -3,6 +3,7 @@ import { chebyshevDistance } from "../../../engine/geometry";
 import {
   CACHE,
   type GearKind,
+  GOLD,
   type ItemKind,
   isSupply,
   itemKind,
@@ -32,12 +33,18 @@ export const CACHE_NAME = "Supply Cache";
 const CACHE_DESCRIPTION =
   "A sealed crate left by the survey crews. Break it open to find one supply inside.";
 
+export const GOLD_NAME = "Gold";
+const GOLD_DESCRIPTION =
+  "Coins the observatory's crews left behind. Merchants on the way down take them.";
+
 export function lootName(id: LootId): string {
-  return id === CACHE ? CACHE_NAME : itemKind(id).name;
+  if (id === CACHE) return CACHE_NAME;
+  return id === GOLD ? GOLD_NAME : itemKind(id).name;
 }
 
 export function lootDescription(id: LootId): string {
-  return id === CACHE ? CACHE_DESCRIPTION : itemKind(id).description;
+  if (id === CACHE) return CACHE_DESCRIPTION;
+  return id === GOLD ? GOLD_DESCRIPTION : itemKind(id).description;
 }
 
 /** "a Salve", "an Ember Shard". */
@@ -196,3 +203,13 @@ export function causeName(cause: Cause): string {
 function isTrapKind(cause: Cause): cause is TrapKind {
   return (TRAP_IDS as readonly string[]).includes(cause);
 }
+
+/** "1 creature", "3 creatures". */
+export function plural(count: number, word: string): string {
+  return `${count} ${word}${count === 1 ? "" : "s"}`;
+}
+
+export const MERCHANT_TEXT =
+  "A quartermaster who stayed behind when the observatory emptied, trading with anyone who comes down. Creatures leave the stall alone.";
+export const BEACON_TEXT =
+  "The fire the astronomers lit to hold back what woke in the deep. It gutters now. Defeat its Warden, then rekindle it.";

@@ -30,8 +30,10 @@ The owner is new to development tooling. Explain setup steps and trade-offs plai
 - Every animation must respect `prefers-reduced-motion` (no bob, shake, particles; shorter steps).
 - **Saves must never break:** every save-format change bumps the format version, adds an upgrade
   step and adds a test that loads the previous format. Capture a genuine fixture from the old
-  engine *before* changing it (see `tests/fixtures/character-v1.json` and `character-v2.json`);
+  engine *before* changing it (see `tests/fixtures/character-v1.json` to `character-v3.json`);
   fixtures are never reformatted (Biome ignores `tests/fixtures`).
+- **Balance changes are measured:** run `pnpm balance` on tuning seeds before and after, and
+  confirm on the check seeds (from 100001); record the result in `docs/DEVELOPMENT_GUIDE.md`.
 - **Balance numbers** live only in `src/engine/rules.ts` (catalog stats sit in `creatures.ts` and
   `items.ts`). Floor generation draws the layout and stairs first, then the camp, creatures,
   items and traps, in that order, so adding content never changes a floor's shape or what was
@@ -61,9 +63,10 @@ The owner is new to development tooling. Explain setup steps and trade-offs plai
 | `pnpm dev:web` | Game window only in a browser, at http://localhost:5173 (no Electron; saves in browser storage) |
 | `pnpm check` | Typecheck (engine, node, web) + Biome lint + Vitest |
 | `pnpm format` | Biome auto-format and import sorting |
-| `pnpm smoke` | Builds, then launches the title screen, the game, and the game with the pack open, with throwaway saves; screenshots and reports in `.smoke/`; fails on console errors |
+| `pnpm smoke` | Builds, then launches the title screen, the game, and the game with the pack or the merchant panel open, with throwaway saves; screenshots and reports in `.smoke/`; fails on console errors |
 | `node scripts/smoke.mjs <path\to\Embercrawl.exe>` | Same check against a packaged build |
-| `pnpm exec tsx scripts/demo-saves.mts <folder> [--showcase] <floor>...` | Demo characters already on chosen floors, one user-data folder per floor; `--showcase` gathers creatures around the hero, lays out items, a cache and a found trap, and stocks the pack |
+| `pnpm balance [runs] [first seed]` | The balance bot plays whole descents and reports the win rate (target 25–35%); tuning seeds 1–300, check seeds from 100001 |
+| `pnpm exec tsx scripts/demo-saves.mts <folder> [--showcase] <floor>...` | Demo characters already on chosen floors, one user-data folder per floor; `--showcase` gathers creatures around the hero, lays out items, a cache and a found trap, and stocks the pack; `--merchant` stands the hero at a merchant with gold; `--won` makes a won floor 30 |
 | `pnpm dist` | Builds into `release/<version>/`, for x64 and ARM64 each: a zip to unpack and run (no install), a single portable exe, and an installer |
 | `node scripts/make-icon.mjs [source.png]` | Rebuilds `build/icon.png` and `build/icon.ico` |
 
@@ -117,7 +120,10 @@ The owner is new to development tooling. Explain setup steps and trade-offs plai
 
 - `src/engine` — game rules (pure, seeded): map, generation, sight, paths, `creatures` (roster),
   `items` (supplies, weapons, armor, traps), `pack` (slot helpers), `rules` (all balance
-  numbers), `run` (actions, combat, items, traps, creature turns, events), save format
+  numbers), `run` (actions, combat, items, traps, gold, trading, guardians, the Beacon, creature
+  turns, events), save format
+- `src/bot` — the balance bot: a fixed, simple player used by `scripts/balance.mts` (pure, like
+  the engine)
 - `src/main` — Electron main process: window, save store (`save-store.ts`), smoke-test mode
 - `src/preload` — exposes `window.embercrawl`
 - `src/shared` — types shared across processes (`bridge.ts`)

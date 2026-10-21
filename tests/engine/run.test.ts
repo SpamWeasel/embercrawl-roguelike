@@ -110,11 +110,11 @@ describe("stairs", () => {
     if (!downStairs) throw new Error("Floor 1 needs down stairs.");
 
     run = walkTo(run, downStairs);
-    expect(availableInteraction(run)).toEqual({ kind: "descend", toDepth: 2 });
+    expect(availableInteraction(run)).toEqual({ kind: "descend", toDepth: 2, sealedBy: null });
     run = applyAction(run, { type: "use-stairs" }).run;
     expect(run.depth).toBe(2);
     expect({ x: run.hero.x, y: run.hero.y }).toEqual(currentFloor(run).upStairs);
-    expect(availableInteraction(run)).toEqual({ kind: "ascend", toDepth: 1 });
+    expect(availableInteraction(run)).toEqual({ kind: "ascend", toDepth: 1, sealedBy: null });
 
     const secondFloor = currentFloor(run);
     run = applyAction(run, { type: "use-stairs" }).run;

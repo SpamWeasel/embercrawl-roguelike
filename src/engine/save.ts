@@ -1,10 +1,11 @@
 import { z } from "zod";
 import { CREATURE_IDS, type CreatureId } from "./creatures";
-import { generateFloor } from "./generate";
+import { type Floor, generateFloor } from "./generate";
 import {
   ARMOR_IDS,
   type ArmorId,
   CACHE,
+  GOLD,
   ITEM_IDS,
   type ItemId,
   STARTING_ARMOR,
@@ -30,9 +31,10 @@ import { newRun, type RunState } from "./run";
  * 1. Exploration only (milestone 1).
  * 2. Creatures, combat, the lantern, camps and the bestiary (milestone 3).
  * 3. Items, the pack, weapons and armor, and traps (milestone 4).
+ * 4. Gold, merchants, guardians that seal the stairs, the Beacon and victory (milestone 5).
  */
 export const SAVE_FORMAT = "embercrawl-character";
-export const SAVE_VERSION = 3;
+export const SAVE_VERSION = 4;
 export const CHARACTER_NAME_MAX = 24;
 
 export interface CharacterRecord {
@@ -40,6 +42,8 @@ export interface CharacterRecord {
   readonly descents: number;
   readonly deepestFloor: number;
   readonly deaths: number;
+  /** Descents that ended with the Beacon rekindled. */
+  readonly wins: number;
   /** Every creature kind this character has ever seen (their bestiary). */
   readonly discovered: readonly CreatureId[];
 }
@@ -63,8 +67,12 @@ export interface CharacterSummary {
   readonly name: string;
   readonly depth: number | null;
   readonly level: number | null;
-  /** "active": mid-descent. "dead": the last descent ended in death. "none": between descents. */
-  readonly status: "active" | "dead" | "none";
+  /**
+   * "active": mid-descent. "dead": the last descent ended in death. "won": it ended with the Beacon
+   * rekindled. "none": between descents.
+   */
+  readonly status: "active" | "dead" | "won" | "none";
+  readonly wins: number;
   readonly deepestFloor: number;
   readonly playTimeMs: number;
   readonly createdAt: string;
@@ -110,7 +118,7 @@ export function newCharacter({ id, name, now, seed }: NewCharacterOptions): Char
     updatedAt: now,
     playTimeMs: 0,
     run,
-    record: { descents: 1, deepestFloor: 1, deaths: 0, discovered: [...run.discovered] },
+    record: { descents: 1, deepestFloor: 1, deaths: 0, wins: 0, discovered: [...run.discovered] },
   };
 }
 
@@ -136,6 +144,7 @@ export function updateCharacter(
   { now, playTimeMs }: { readonly now: string; readonly playTimeMs: number },
 ): CharacterSave {
   const justDied = run?.status === "dead" && save.run?.status === "active";
+  const justWon = run?.status === "won" && save.run?.status === "active";
   return {
     ...save,
     run,
@@ -145,6 +154,7 @@ export function updateCharacter(
       ...save.record,
       deepestFloor: Math.max(save.record.deepestFloor, run?.depth ?? 0),
       deaths: save.record.deaths + (justDied ? 1 : 0),
+      wins: save.record.wins + (justWon ? 1 : 0),
       discovered: mergeDiscovered(save.record.discovered, run?.discovered ?? []),
     },
   };
@@ -166,6 +176,7 @@ export function summarizeCharacter(save: CharacterSave): CharacterSummary {
     level: save.run?.hero.level ?? null,
     status: save.run?.status ?? "none",
     deepestFloor: save.record.deepestFloor,
+    wins: save.record.wins,
     playTimeMs: save.playTimeMs,
     createdAt: save.createdAt,
     updatedAt: save.updatedAt,
@@ -220,7 +231,46 @@ const UPGRADES: Readonly<
     ...save,
     run: isRecord(save.run) ? upgradeRunFrom2(save.run) : null,
   }),
+  /**
+   * 3 → 4: adds gold, merchants and the Beacon. The purse starts empty. Floors already visited get
+   * the gold piles, merchant and Beacon they would have been made with (gold is left off the
+   * hero's tile and tiles already holding an item).
+   */
+  3: (save) => {
+    const record = isRecord(save.record) ? save.record : {};
+    return {
+      ...save,
+      run: isRecord(save.run) ? upgradeRunFrom3(save.run) : null,
+      record: { ...record, wins: 0 },
+    };
+  },
 };
+
+function upgradeRunFrom3(run: Record<string, unknown>): Record<string, unknown> {
+  const seed = Number.isInteger(run.seed) ? (run.seed as number) : 0;
+  const hero = isRecord(run.hero) ? run.hero : {};
+  const floors = Array.isArray(run.floors) ? run.floors : [];
+  return {
+    ...run,
+    gold: 0,
+    floors: floors.map((floor) => {
+      if (!isRecord(floor)) return floor;
+      const original = originalFloor(seed, floor);
+      const items = Array.isArray(floor.items) ? floor.items.filter(isRecord) : [];
+      const occupied = (p: { x: number; y: number }) =>
+        (floor.depth === run.depth && p.x === hero.x && p.y === hero.y) ||
+        items.some((item) => item.x === p.x && item.y === p.y);
+      const gold = original?.items.filter((item) => item.item === GOLD && !occupied(item)) ?? [];
+      return {
+        ...floor,
+        items: [...items, ...gold],
+        merchant: original?.merchant ?? null,
+        stock: original?.stock ?? [],
+        beacon: original?.beacon ?? null,
+      };
+    }),
+  };
+}
 
 function upgradeRunFrom2(run: Record<string, unknown>): Record<string, unknown> {
   const seed = Number.isInteger(run.seed) ? (run.seed as number) : 0;
@@ -232,31 +282,32 @@ function upgradeRunFrom2(run: Record<string, unknown>): Record<string, unknown> 
     pack: emptyPack(),
     floors: floors.map((floor) => {
       if (!isRecord(floor)) return floor;
-      const contents = originalContents(seed, floor);
+      const original = originalFloor(seed, floor);
       const standing = (p: { x: number; y: number }) =>
         floor.depth === run.depth && p.x === hero.x && p.y === hero.y;
+      // Gold arrived with version 4; that upgrade adds it.
+      const items = original?.items.filter((item) => item.item !== GOLD) ?? [];
       return {
         ...floor,
-        items: contents.items.filter((item) => !standing(item)),
-        traps: contents.traps.filter((trap) => !standing(trap)),
+        items: items.filter((item) => !standing(item)),
+        traps: (original?.traps ?? []).filter((trap) => !standing(trap)),
       };
     }),
   };
 }
 
-/** A saved floor's items and traps, regenerated from its seed; none if the layout doesn't match. */
-function originalContents(seed: number, floor: Record<string, unknown>) {
-  const none = { items: [], traps: [] };
+/** A saved floor as it was first made, regenerated from the seed; null if the layout doesn't match. */
+function originalFloor(seed: number, floor: Record<string, unknown>): Floor | null {
   const depth = floor.depth;
   if (typeof depth !== "number" || !Number.isInteger(depth) || depth < 1 || depth > FLOOR_COUNT)
-    return none;
+    return null;
   const original = generateFloor(seed, depth);
   const tiles = floor.tiles;
   const sameLayout =
     Array.isArray(tiles) &&
     tiles.length === original.tiles.length &&
     tiles.every((tile, index) => tile === original.tiles[index]);
-  return sameLayout ? { items: original.items, traps: original.traps } : none;
+  return sameLayout ? original : null;
 }
 
 function upgradeRunFrom1(run: Record<string, unknown>): Record<string, unknown> {
@@ -325,7 +376,14 @@ const TileSchema = z.union([z.literal(0), z.literal(1), z.literal(2), z.literal(
 
 const FloorItemSchema = PointSchema.extend({
   id: z.string().min(1).max(16),
-  item: z.union([ItemIdSchema, z.literal(CACHE)]),
+  item: z.union([ItemIdSchema, z.literal(CACHE), z.literal(GOLD)]),
+  amount: z.number().int().min(1).optional(),
+});
+
+const ShopOfferSchema = z.object({
+  item: ItemIdSchema,
+  price: z.number().int().min(1),
+  count: Count,
 });
 
 const TrapSchema = PointSchema.extend({
@@ -364,6 +422,9 @@ const FloorSchema = z.object({
   monsters: z.array(MonsterSchema).max(40),
   items: z.array(FloorItemSchema).max(MAP_SIZE),
   traps: z.array(TrapSchema).max(40),
+  merchant: PointSchema.nullable(),
+  stock: z.array(ShopOfferSchema).max(20),
+  beacon: PointSchema.nullable(),
 });
 
 const HeroSchema = PointSchema.extend({
@@ -391,10 +452,11 @@ const RunSchema = z
     lantern: z.object({ charge: Count.max(LANTERN_MAX), bright: z.boolean() }),
     equipment: z.object({ weapon: WeaponIdSchema, armor: ArmorIdSchema }),
     pack: z.array(PackEntrySchema.nullable()).length(PACK_SLOTS),
+    gold: Count,
     rng: z.tuple([Uint32, Uint32, Uint32, Uint32]),
     kills: Count,
     discovered: z.array(CreatureIdSchema),
-    status: z.enum(["active", "dead"]),
+    status: z.enum(["active", "dead", "won"]),
     killedBy: z.union([CreatureIdSchema, TrapKindSchema]).nullable(),
   })
   .refine((run) => new Set(run.floors.map((f) => f.depth)).size === run.floors.length, {
@@ -426,6 +488,7 @@ const CharacterSchema = z.object({
     descents: Count,
     deepestFloor: Count.max(FLOOR_COUNT),
     deaths: Count,
+    wins: Count,
     discovered: z.array(CreatureIdSchema),
   }),
 }) satisfies z.ZodType<CharacterSave>;

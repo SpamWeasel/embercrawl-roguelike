@@ -2,7 +2,9 @@ import { useEffect, useState } from "react";
 
 /** A short build label: version details in the desktop app, or a note that this is the browser preview. */
 export function useBuildLabel(): string {
-  const [label, setLabel] = useState(window.embercrawl ? "Desktop build" : "Browser preview");
+  const [label, setLabel] = useState(
+    window.embercrawl ? `v${__APP_VERSION__}` : `v${__APP_VERSION__} · Browser preview`,
+  );
   useEffect(() => {
     let active = true;
     window.embercrawl?.getAppInfo().then((info) => {

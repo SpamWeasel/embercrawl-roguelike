@@ -1,11 +1,13 @@
 // Creates demo characters already standing on chosen floors, for looking at deep floors without
 // playing down to them. Each floor gets its own folder, usable as the app's user-data folder.
 //
-// Usage: pnpm exec tsx scripts/demo-saves.mts <output folder> [--showcase] <floor> [floor...]
+// Usage: pnpm exec tsx scripts/demo-saves.mts <output folder> [options] <floor> [floor...]
 //   SEED=123 pnpm exec tsx scripts/demo-saves.mts .demo 1 4 30
 // Floors passed on the way down are cleared of creatures and traps. With --showcase, a few creatures on the
 // final floor are moved next to the hero (one about to strike, one wounded) to show combat visuals,
 // and items, a cache and a found trap are laid out nearby, with a stocked pack.
+// With --merchant (floors 3, 6, ... 27), the hero stands at the merchant's stall with gold to spend
+// and the floor mapped. With --won (floor 30), the Warden has fallen and the Beacon is rekindled.
 // Then launch with EMBERCRAWL_USER_DATA=<output folder>\floor-<n> (see CLAUDE.md).
 import { randomUUID } from "node:crypto";
 import { join, resolve } from "node:path";
@@ -20,7 +22,9 @@ import { SaveStore } from "../src/main/save-store";
 
 const args = process.argv.slice(2);
 const showcaseWanted = args.includes("--showcase");
-const [outDir, ...floorArgs] = args.filter((a) => a !== "--showcase");
+const merchantWanted = args.includes("--merchant");
+const wonWanted = args.includes("--won");
+const [outDir, ...floorArgs] = args.filter((a) => !a.startsWith("--"));
 const floors = floorArgs.map(Number);
 if (
   !outDir ||
@@ -28,7 +32,7 @@ if (
   floors.some((f) => !Number.isInteger(f) || f < 1 || f > FLOOR_COUNT)
 ) {
   console.error(
-    `Usage: tsx scripts/demo-saves.mts <output folder> [--showcase] <floor 1-${FLOOR_COUNT}> [floor...]`,
+    `Usage: tsx scripts/demo-saves.mts <output folder> [--showcase] [--merchant] [--won] <floor 1-${FLOOR_COUNT}> [floor...]`,
   );
   process.exit(1);
 }
@@ -122,6 +126,34 @@ function showcase(run: RunState): RunState {
   };
 }
 
+/** The hero at this floor's merchant with gold to spend, and the whole floor mapped. */
+function atMerchant(run: RunState): RunState {
+  const floor = currentFloor(run);
+  if (!floor.merchant) throw new Error(`Floor ${run.depth} has no merchant (try 3, 6, ... 27).`);
+  return {
+    ...run,
+    hero: { ...run.hero, x: floor.merchant.x, y: floor.merchant.y },
+    gold: 900,
+    pack: packWith(["salve", 2], ["iron-cleaver", 1], ["ward-sigil", 1]),
+    floors: run.floors.map((f) =>
+      f.depth === run.depth ? { ...f, explored: f.explored.map(() => true) } : f,
+    ),
+  };
+}
+
+/** The final floor won: the Warden gone and the Beacon rekindled by the normal rules. */
+function rekindled(run: RunState): RunState {
+  const floor = currentFloor(run);
+  if (!floor.beacon) throw new Error("Only floor 30 has the Beacon.");
+  const ready: RunState = {
+    ...run,
+    hero: { ...run.hero, x: floor.beacon.x, y: floor.beacon.y },
+    gold: 1234,
+    floors: run.floors.map((f) => (f.depth === run.depth ? { ...f, monsters: [] } : f)),
+  };
+  return applyAction(ready, { type: "rekindle" }).run;
+}
+
 function packWith(...entries: Array<[ItemId, number]>): Pack {
   return emptyPack().map((_, slot) => {
     const entry = entries[slot];
@@ -137,6 +169,8 @@ for (const depth of floors) {
   // One turn in, so the game skips the new-descent story card.
   if (run.turn === 0) run = applyAction(run, { type: "wait" }).run;
   if (showcaseWanted) run = showcase(run);
+  if (merchantWanted) run = atMerchant(run);
+  if (wonWanted) run = rekindled(run);
   const save = updateCharacter(fresh, run, { now, playTimeMs: 0 });
   const folder = resolve(outDir, `floor-${depth}`);
   await new SaveStore(join(folder, "Saves")).write(save);

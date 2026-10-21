@@ -1,9 +1,9 @@
 /**
- * Every number that shapes combat and progression, in one place. Milestone 5's balance bot tunes
- * these; change them here rather than scattering constants through the rules.
+ * Every number that shapes combat and progression, in one place. The balance bot
+ * (`scripts/balance.mts`) measures them; change them here rather than scattering constants.
  */
 import type { CreatureKind } from "./creatures";
-import type { SupplyId, TrapKind } from "./items";
+import { type ItemId, isSupply, itemKind, type SupplyId, type TrapKind } from "./items";
 
 /** The hero. */
 export const HERO_START_HP = 30;
@@ -43,8 +43,14 @@ export const SPAWN_CLEARANCE = 6;
 export const NEW_CREATURE_WINDOW = 3;
 /** Creatures stop appearing this many floors after their first floor. */
 export const CREATURE_LIFESPAN = 10;
-/** Softens creature strikes a little; milestone 5's balance bot decides whether it stays. */
-const CREATURE_ATTACK_FACTOR = 0.9;
+/**
+ * Creature attack is scaled by BASE + PER_FLOOR × floor: a little softer than the catalog near the
+ * top, harder deep down, so a hero who has outgrown the early floors still meets a real fight.
+ */
+export const CREATURE_ATTACK_BASE = 1.02;
+/** Creatures gain this share of their health for each floor below their first. */
+export const CREATURE_HP_PER_FLOOR = 0.105;
+export const CREATURE_ATTACK_PER_FLOOR = 0;
 
 /** Traps. */
 /** Bright light shows hidden traps this close (diagonals count as one). Dim light shows none. */
@@ -95,8 +101,14 @@ export function scaledStats(
   const steps = Math.max(0, depth - kind.firstFloor);
   const variance = kind.guardian ? 1 : 0.9 + roll * 0.25;
   return {
-    hp: Math.max(1, Math.round(kind.hp * (1 + 0.08 * steps) * variance)),
-    attack: Math.max(1, Math.round((kind.attack + Math.floor(steps / 3)) * CREATURE_ATTACK_FACTOR)),
+    hp: Math.max(1, Math.round(kind.hp * (1 + CREATURE_HP_PER_FLOOR * steps) * variance)),
+    attack: Math.max(
+      1,
+      Math.round(
+        (kind.attack + Math.floor(steps / 3)) *
+          (CREATURE_ATTACK_BASE + CREATURE_ATTACK_PER_FLOOR * depth),
+      ),
+    ),
   };
 }
 
@@ -163,6 +175,68 @@ export function trapCount(depth: number): number {
 /** How likely each kind of trap is, relative to the others (once past its first floor). */
 export function trapWeight(kind: TrapKind): number {
   return kind === "ember-vent" ? 3 : 1.5;
+}
+
+/** Gold. */
+
+/** Gold piles lying on a floor. */
+export function goldPileCount(depth: number): number {
+  return 3 + Math.floor(depth / 6);
+}
+
+/** The fewest and most coins in one pile on a floor. */
+export function goldPileRange(depth: number): readonly [number, number] {
+  return [3 + depth, 8 + 2 * depth];
+}
+
+/** Coins a creature drops when slain. `roll` is a random 0–3. */
+export function killGold(depth: number, roll: number): number {
+  return 1 + roll + Math.floor(depth / 3);
+}
+
+/** Extra coins a guardian leaves behind, along with a piece of gear. */
+export function guardianHoard(depth: number): number {
+  return 40 + 8 * depth;
+}
+
+/** Guardians leave gear from this many floors ahead. */
+export const GUARDIAN_GEAR_LEAD = 3;
+
+/** Merchants. */
+
+/** A merchant keeps a stall on every third floor (3, 6, ... 27). */
+export function hasMerchant(depth: number): boolean {
+  return depth % 3 === 0 && depth < 30;
+}
+
+/** Supplies on a merchant's stall, and how many of each (1 to this many). */
+export const SHOP_SUPPLY_OFFERS = 4;
+export const SHOP_SUPPLY_STOCK = 3;
+/** A merchant's gear comes from this many floors ahead. */
+export const SHOP_GEAR_LEAD = 2;
+
+/** Prices rise 8% per floor, so deeper gold doesn't make shopping trivial. */
+export function priceAt(basePrice: number, depth: number): number {
+  return Math.round(basePrice * (1 + 0.08 * depth));
+}
+
+/** A weapon or armor's base price, from the floor it starts turning up on. */
+export function gearPrice(tier: number): number {
+  return 50 + 30 * tier;
+}
+
+/** Merchants buy items back for this share of their base price. */
+export const SELL_SHARE = 0.4;
+
+/** An item's price on floor 1, before the deeper-floor rise. */
+export function basePrice(id: ItemId): number {
+  const kind = itemKind(id);
+  return isSupply(kind) ? kind.price : gearPrice(kind.tier);
+}
+
+/** What a merchant pays for one of an item. */
+export function sellPrice(id: ItemId): number {
+  return Math.max(1, Math.floor(basePrice(id) * SELL_SHARE));
 }
 
 /** A trap's strength (see Trap.power). `roll` is a random 0–2. */

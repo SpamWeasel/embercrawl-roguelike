@@ -1,5 +1,5 @@
 import { type CreatureId, creatureKind, type Monster } from "./creatures";
-import { type Floor, generateFloor, pickSupply } from "./generate";
+import { type Floor, generateFloor, pickGear, pickSupply } from "./generate";
 import {
   chebyshevDistance,
   DIRECTION_VECTORS,
@@ -17,11 +17,13 @@ import {
   type FloorItem,
   type GearId,
   type GearKind,
+  GOLD,
   type ItemId,
   isSupply,
   itemKind,
   type LootId,
   type Pack,
+  type ShopOffer,
   STARTING_ARMOR,
   STARTING_WEAPON,
   type SupplyId,
@@ -30,7 +32,7 @@ import {
   type TrapKind,
   type WeaponId,
 } from "./items";
-import { canStep, FLOOR_COUNT, indexOf, MAP_SIZE, pointOf, Tile, tileAt } from "./map";
+import { canStep, FLOOR_COUNT, inBounds, indexOf, MAP_SIZE, pointOf, Tile, tileAt } from "./map";
 import { emptyPack, packAdd, packRemoveOne } from "./pack";
 import { findPath, stepDistances } from "./path";
 import { Rng, type RngState } from "./rng";
@@ -42,10 +44,13 @@ import {
   CREATURE_HIT_SPREAD,
   creatureHit,
   DIM_SIGHT,
+  GUARDIAN_GEAR_LEAD,
+  guardianHoard,
   HERO_HIT_SPREAD,
   HERO_START_HP,
   heroAttackPower,
   heroDefense,
+  killGold,
   LANTERN_MAX,
   LEVEL_HEAL,
   LEVEL_HP_GAIN,
@@ -55,6 +60,7 @@ import {
   PULSE_RADIUS,
   PULSE_SHIELD,
   RANGED_REACH,
+  sellPrice,
   TRAP_SPOT_RANGE,
   WAYSTONE_CLEARANCE,
   WAYSTONE_MIN_JUMP,
@@ -93,12 +99,14 @@ export interface RunState {
   readonly lantern: Lantern;
   readonly equipment: Equipment;
   readonly pack: Pack;
+  readonly gold: number;
   /** The gameplay random stream (combat rolls, erratic steps), separate from floor generation. */
   readonly rng: RngState;
   readonly kills: number;
   /** Creature kinds seen during this descent. */
   readonly discovered: readonly CreatureId[];
-  readonly status: "active" | "dead";
+  /** "won": the Beacon has been rekindled; the descent is over. */
+  readonly status: "active" | "dead" | "won";
   readonly killedBy: Cause | null;
 }
 
@@ -114,7 +122,13 @@ export type Action =
   /** Uses the supply, or equips the weapon or armor, in a pack slot. */
   | { readonly type: "use-item"; readonly slot: number }
   /** Sets one item from a pack slot down where the hero stands. */
-  | { readonly type: "drop-item"; readonly slot: number };
+  | { readonly type: "drop-item"; readonly slot: number }
+  /** Buys one of an offer from the merchant the hero stands at. */
+  | { readonly type: "buy"; readonly offer: number }
+  /** Sells one item from a pack slot to the merchant the hero stands at. */
+  | { readonly type: "sell"; readonly slot: number }
+  /** Rekindles the Beacon the hero stands at, once its Warden has fallen. */
+  | { readonly type: "rekindle" };
 
 /** Why a supply wasn't used (it would have been wasted). */
 export type UnneededReason = "full-health" | "full-charge" | "no-targets";
@@ -170,7 +184,40 @@ export type GameEvent =
       readonly kind: CreatureId;
       readonly at: Point;
       readonly xp: number;
+      /** Coins it dropped, added straight to the hero's purse. */
+      readonly gold: number;
     }
+  /** A guardian's hoard: extra gold, and a piece of gear left where it fell (or close by). */
+  | {
+      readonly type: "hoard";
+      readonly kind: CreatureId;
+      readonly gold: number;
+      readonly loot: string;
+      readonly item: GearId;
+      readonly at: Point;
+    }
+  | {
+      readonly type: "gold-found";
+      readonly loot: string;
+      readonly amount: number;
+      readonly at: Point;
+    }
+  | {
+      readonly type: "bought";
+      readonly item: ItemId;
+      readonly price: number;
+      /** Index of the offer, so its count can be animated. */
+      readonly offer: number;
+    }
+  | { readonly type: "sold"; readonly item: ItemId; readonly price: number }
+  | { readonly type: "cannot-afford"; readonly item: ItemId; readonly price: number }
+  | { readonly type: "sold-out"; readonly item: ItemId }
+  | { readonly type: "no-merchant" }
+  /** The stairs down won't open while this floor's guardian lives. */
+  | { readonly type: "stairs-sealed"; readonly by: CreatureId }
+  /** The Beacon can't be rekindled while its Warden lives. */
+  | { readonly type: "beacon-smothered"; readonly by: CreatureId }
+  | { readonly type: "rekindled"; readonly at: Point }
   | { readonly type: "leveled-up"; readonly level: number }
   | { readonly type: "spotted"; readonly kind: CreatureId }
   | {
@@ -240,8 +287,15 @@ export interface ActionResult {
 
 /** What the hero can do on the current tile, for the on-screen prompt. */
 export type Interaction =
-  | { readonly kind: "descend" | "ascend"; readonly toDepth: number }
+  | {
+      readonly kind: "descend" | "ascend";
+      readonly toDepth: number;
+      /** The guardian keeping the way down shut, if it still lives. */
+      readonly sealedBy: CreatureId | null;
+    }
   | { readonly kind: "rest" }
+  | { readonly kind: "trade" }
+  | { readonly kind: "rekindle"; readonly smotheredBy: CreatureId | null }
   | { readonly kind: "pick-up"; readonly item: LootId };
 
 export function newRun(seed: number): RunState {
@@ -266,6 +320,7 @@ export function newRun(seed: number): RunState {
     lantern,
     equipment: { weapon: STARTING_WEAPON, armor: STARTING_ARMOR },
     pack: emptyPack(),
+    gold: 0,
     rng: Rng.derive(seed, "play").state(),
     kills: 0,
     discovered: seen.discovered,
@@ -324,10 +379,16 @@ function gearPower(id: GearId): number {
 export function availableInteraction(run: RunState): Interaction | null {
   const floor = currentFloor(run);
   const kind = tileAt(floor.tiles, run.hero);
-  if (kind === Tile.StairsDown && run.depth < FLOOR_COUNT)
-    return { kind: "descend", toDepth: run.depth + 1 };
-  if (kind === Tile.StairsUp && run.depth > 1) return { kind: "ascend", toDepth: run.depth - 1 };
+  if (kind === Tile.StairsDown && run.depth < FLOOR_COUNT) {
+    const guardian = livingGuardian(floor);
+    return { kind: "descend", toDepth: run.depth + 1, sealedBy: guardian?.kind ?? null };
+  }
+  if (kind === Tile.StairsUp && run.depth > 1)
+    return { kind: "ascend", toDepth: run.depth - 1, sealedBy: null };
   if (floor.camp && samePoint(floor.camp, run.hero) && !floor.campUsed) return { kind: "rest" };
+  if (floor.merchant && samePoint(floor.merchant, run.hero)) return { kind: "trade" };
+  if (floor.beacon && samePoint(floor.beacon, run.hero))
+    return { kind: "rekindle", smotheredBy: livingGuardian(floor)?.kind ?? null };
   const loot = floor.items.find((item) => samePoint(item, run.hero));
   if (loot) return { kind: "pick-up", item: loot.item };
   return null;
@@ -337,6 +398,25 @@ export function availableInteraction(run: RunState): Interaction | null {
 export function onCamp(run: RunState): boolean {
   const camp = currentFloor(run).camp;
   return camp !== null && samePoint(camp, run.hero);
+}
+
+/** Whether the hero is standing at this floor's merchant, and can trade. */
+export function atMerchant(run: RunState): boolean {
+  const merchant = currentFloor(run).merchant;
+  return merchant !== null && samePoint(merchant, run.hero);
+}
+
+/** A floor's guardian, while it lives. */
+export function livingGuardian(floor: Floor): Monster | undefined {
+  return floor.monsters.find((m) => m.hp > 0 && creatureKind(m.kind).guardian === true);
+}
+
+/** Camps and merchants' stalls: creatures can't step there or strike someone standing there. */
+function isWarded(floor: Floor, p: Point): boolean {
+  return (
+    (floor.camp !== null && samePoint(floor.camp, p)) ||
+    (floor.merchant !== null && samePoint(floor.merchant, p))
+  );
 }
 
 /** Applies one player action, then lets creatures respond. The input run is never modified. */
@@ -368,6 +448,8 @@ class Turn {
   private traps: readonly Trap[];
   private explored: readonly boolean[];
   private campUsed: boolean;
+  private stock: readonly ShopOffer[];
+  private gold: number;
   private turnNumber: number;
   private kills: number;
   private status: RunState["status"];
@@ -385,6 +467,8 @@ class Turn {
     this.traps = this.floor.traps;
     this.explored = this.floor.explored;
     this.campUsed = this.floor.campUsed;
+    this.stock = this.floor.stock;
+    this.gold = run.gold;
     this.turnNumber = run.turn;
     this.kills = run.kills;
     this.status = run.status;
@@ -411,7 +495,71 @@ class Turn {
         return this.handleItem(action.slot);
       case "drop-item":
         return this.dropItem(action.slot);
+      case "buy":
+        return this.buy(action.offer);
+      case "sell":
+        return this.sell(action.slot);
+      case "rekindle":
+        return this.rekindle();
     }
+  }
+
+  private atStall(): boolean {
+    const merchant = this.floor.merchant;
+    if (merchant && samePoint(merchant, this.hero)) return true;
+    this.events.push({ type: "no-merchant" });
+    return false;
+  }
+
+  /** Buys one of an offer: it needs the gold and room in the pack. */
+  private buy(index: number): boolean {
+    if (!this.atStall()) return false;
+    const offer = this.stock[index];
+    if (!offer) return false;
+    if (offer.count === 0) {
+      this.events.push({ type: "sold-out", item: offer.item });
+      return false;
+    }
+    if (this.gold < offer.price) {
+      this.events.push({ type: "cannot-afford", item: offer.item, price: offer.price });
+      return false;
+    }
+    const pack = packAdd(this.pack, offer.item);
+    if (!pack) {
+      this.events.push({ type: "pack-full", item: offer.item });
+      return false;
+    }
+    this.pack = pack;
+    this.gold -= offer.price;
+    this.stock = this.stock.map((o, i) => (i === index ? { ...o, count: o.count - 1 } : o));
+    this.events.push({ type: "bought", item: offer.item, price: offer.price, offer: index });
+    return true;
+  }
+
+  /** Sells one item from a pack slot for a share of its base price. */
+  private sell(slot: number): boolean {
+    if (!this.atStall()) return false;
+    const entry = this.pack[slot];
+    if (!entry) return false;
+    const price = sellPrice(entry.item);
+    this.pack = packRemoveOne(this.pack, slot);
+    this.gold += price;
+    this.events.push({ type: "sold", item: entry.item, price });
+    return true;
+  }
+
+  /** Rekindles the Beacon, winning the descent, once its Warden has fallen. */
+  private rekindle(): boolean {
+    const beacon = this.floor.beacon;
+    if (!beacon || !samePoint(beacon, this.hero)) return false;
+    const warden = this.monsters.find((m) => m.hp > 0 && creatureKind(m.kind).guardian === true);
+    if (warden) {
+      this.events.push({ type: "beacon-smothered", by: warden.kind });
+      return false;
+    }
+    this.status = "won";
+    this.events.push({ type: "rekindled", at: { x: beacon.x, y: beacon.y } });
+    return true;
   }
 
   private attackPower(): number {
@@ -508,6 +656,14 @@ class Turn {
     if (!loot) {
       if (!auto) this.events.push({ type: "nothing-here" });
       return false;
+    }
+    if (loot.item === GOLD) {
+      // Coins go straight into the purse, never the pack.
+      const amount = loot.amount ?? 0;
+      this.gold += amount;
+      this.items = this.items.filter((i) => i !== loot);
+      this.events.push({ type: "gold-found", loot: loot.id, amount, at: { x: loot.x, y: loot.y } });
+      return true;
     }
     const fromCache = loot.item === CACHE;
     const item =
@@ -611,18 +767,19 @@ class Turn {
 
   /**
    * A random open tile well away from every creature and from where the hero stands, never on an
-   * item, a trap or the camp. Failing that, the open tile farthest from any creature.
+   * item, a trap, the camp, the merchant or the Beacon. Failing that, the open tile farthest from
+   * any creature.
    */
   private waystoneLanding(): Point {
     const tiles = this.floor.tiles;
-    const camp = this.floor.camp;
+    const beacon = this.floor.beacon;
     const living = this.monsters.filter((m) => m.hp > 0);
     const candidates: Point[] = [];
     for (let index = 0; index < MAP_SIZE; index++) {
       if (tiles[index] !== Tile.Floor) continue;
       const p = pointOf(index);
       if (chebyshevDistance(p, this.hero) < WAYSTONE_MIN_JUMP) continue;
-      if (camp && samePoint(camp, p)) continue;
+      if (isWarded(this.floor, p) || (beacon && samePoint(beacon, p))) continue;
       if (this.items.some((i) => samePoint(i, p)) || this.traps.some((t) => samePoint(t, p)))
         continue;
       if (living.some((m) => samePoint(m, p))) continue;
@@ -659,10 +816,11 @@ class Turn {
   private dropItem(slot: number): boolean {
     const entry = this.pack[slot];
     if (!entry) return false;
-    const camp = this.floor.camp;
+    const beacon = this.floor.beacon;
     const blocked =
       tileAt(this.floor.tiles, this.hero) !== Tile.Floor ||
-      (camp !== null && samePoint(camp, this.hero)) ||
+      isWarded(this.floor, this.hero) ||
+      (beacon !== null && samePoint(beacon, this.hero)) ||
       this.items.some((i) => samePoint(i, this.hero));
     if (blocked) {
       this.events.push({ type: "cannot-drop" });
@@ -767,16 +925,56 @@ class Turn {
     monster.lastSeen = { x: this.hero.x, y: this.hero.y };
     if (monster.hp > 0) return;
     const kind = creatureKind(monster.kind);
+    const depth = this.run.depth;
+    // Spoils are fixed per creature, so they never disturb the gameplay stream.
+    const gold = killGold(depth, Rng.derive(this.run.seed, "spoils", monster.id).int(0, 3));
     this.kills += 1;
+    this.gold += gold;
     this.events.push({
       type: "monster-died",
       id: monster.id,
       kind: monster.kind,
       at: { x: monster.x, y: monster.y },
       xp: kind.xp,
+      gold,
     });
-    this.gainXp(kind.xp);
     this.monsters = this.monsters.filter((m) => m !== monster);
+    if (kind.guardian) this.leaveHoard(monster);
+    this.gainXp(kind.xp);
+  }
+
+  /** A fallen guardian's hoard: gold for the purse and a piece of gear from deeper down. */
+  private leaveHoard(guardian: Monster): void {
+    const depth = this.run.depth;
+    const gold = guardianHoard(depth);
+    const item = pickGear(
+      Rng.derive(this.run.seed, "hoard", guardian.id),
+      depth + GUARDIAN_GEAR_LEAD,
+    );
+    const at = this.freeTileNear(guardian);
+    const loot: FloorItem = { id: `${depth}-h`, item, x: at.x, y: at.y };
+    this.gold += gold;
+    this.items = [...this.items, loot];
+    this.events.push({ type: "hoard", kind: guardian.kind, gold, loot: loot.id, item, at });
+  }
+
+  /** The nearest open floor tile to `p` with nothing on it (items, traps, wards, the Beacon). */
+  private freeTileNear(p: Point): Point {
+    const beacon = this.floor.beacon;
+    for (let reach = 0; reach <= 6; reach++) {
+      for (let y = p.y - reach; y <= p.y + reach; y++) {
+        for (let x = p.x - reach; x <= p.x + reach; x++) {
+          const q = { x, y };
+          if (chebyshevDistance(q, p) !== reach || !inBounds(q)) continue;
+          if (tileAt(this.floor.tiles, q) !== Tile.Floor || isWarded(this.floor, q)) continue;
+          if (beacon && samePoint(beacon, q)) continue;
+          if (this.items.some((i) => samePoint(i, q)) || this.traps.some((t) => samePoint(t, q)))
+            continue;
+          return q;
+        }
+      }
+    }
+    return { x: p.x, y: p.y };
   }
 
   private gainXp(xp: number): void {
@@ -793,8 +991,7 @@ class Turn {
   /** Each creature perceives, then strikes, readies a strike, or moves. Nearest act first. */
   creaturesAct(): void {
     const tiles = this.floor.tiles;
-    const camp = this.floor.camp;
-    const offCamp = (index: number) => !camp || index !== indexOf(camp);
+    const offCamp = (index: number) => !isWarded(this.floor, pointOf(index));
     const towardHero = stepDistances(tiles, this.hero, offCamp);
     const order = [...this.monsters].sort(
       (a, b) => chebyshevDistance(a, this.hero) - chebyshevDistance(b, this.hero),
@@ -850,8 +1047,7 @@ class Turn {
 
   /** Adjacent (no squeezing past corners), or for ranged creatures, a clear straight or diagonal line. */
   private canStrike(monster: Monster): boolean {
-    const camp = this.floor.camp;
-    if (camp && samePoint(camp, this.hero)) return false;
+    if (isWarded(this.floor, this.hero)) return false;
     const distance = chebyshevDistance(monster, this.hero);
     const direction = directionFromDelta(this.hero.x - monster.x, this.hero.y - monster.y);
     if (!direction) return false;
@@ -896,7 +1092,7 @@ class Turn {
     const options = DIRECTIONS.filter((direction) => {
       if (!canStep(this.floor.tiles, monster, direction)) return false;
       const to = step(monster, direction);
-      if (this.floor.camp && samePoint(to, this.floor.camp)) return false;
+      if (isWarded(this.floor, to)) return false;
       return !samePoint(to, this.hero) && !this.monsterAt(to);
     });
     if (options.length === 0) return false;
@@ -948,6 +1144,7 @@ class Turn {
         items: this.items,
         traps: this.traps,
         explored: this.explored,
+        stock: this.stock,
       },
       hero,
       this.lantern,
@@ -961,6 +1158,7 @@ class Turn {
       lantern: { ...this.lantern },
       equipment: { ...this.equipment },
       pack: this.pack,
+      gold: this.gold,
       floors: replaceFloor(this.run.floors, seen.floor),
       rng: this.rng.state(),
       kills: this.kills,
@@ -981,6 +1179,9 @@ function takeStairs(run: RunState): ActionResult {
   const interaction = availableInteraction(run);
   if (!interaction || (interaction.kind !== "descend" && interaction.kind !== "ascend")) {
     return { run, events: [{ type: "no-stairs" }], tookTurn: false };
+  }
+  if (interaction.sealedBy) {
+    return { run, events: [{ type: "stairs-sealed", by: interaction.sealedBy }], tookTurn: false };
   }
 
   const toDepth = interaction.toDepth;

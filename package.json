@@ -1,7 +1,7 @@
 {
   "name": "embercrawl",
   "productName": "Embercrawl",
-  "version": "0.4.0",
+  "version": "0.5.0",
   "description": "An original turn-based roguelike for the desktop.",
   "private": true,
   "main": "./out/main/index.js",
@@ -16,6 +16,7 @@
     "test": "vitest run",
     "check": "pnpm typecheck && pnpm lint && pnpm test",
     "smoke": "pnpm build && node scripts/smoke.mjs",
+    "balance": "tsx scripts/balance.mts",
     "dist": "pnpm build && electron-builder --win"
   },
   "devDependencies": {

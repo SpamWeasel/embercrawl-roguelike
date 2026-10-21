@@ -29,6 +29,10 @@ function randomAction(rng: Rng, run: RunState): Action {
   if (roll < 0.1) return { type: "pulse" };
   if (roll < 0.16) return { type: "use-item", slot: rng.int(0, PACK_SLOTS - 1) };
   if (roll < 0.17) return { type: "drop-item", slot: rng.int(0, PACK_SLOTS - 1) };
+  // Mostly refused away from a merchant or the Beacon, which is part of what this checks.
+  if (roll < 0.175) return { type: "buy", offer: rng.int(0, 5) };
+  if (roll < 0.18) return { type: "sell", slot: rng.int(0, PACK_SLOTS - 1) };
+  if (roll < 0.182) return { type: "rekindle" };
   return { type: "move", direction: rng.pick(DIRECTIONS) };
 }
 
@@ -41,6 +45,7 @@ function checkInvariants(run: RunState): void {
   expect(run.lantern.charge).toBeGreaterThanOrEqual(0);
   expect(run.lantern.charge).toBeLessThanOrEqual(100);
   expect(run.status === "dead").toBe(hero.hp === 0);
+  expect(run.gold).toBeGreaterThanOrEqual(0);
   expect(run.pack).toHaveLength(PACK_SLOTS);
   for (const entry of run.pack) {
     if (entry) expect(entry.count).toBeGreaterThanOrEqual(1);

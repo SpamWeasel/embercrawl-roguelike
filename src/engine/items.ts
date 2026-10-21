@@ -27,6 +27,8 @@ export interface SupplyKind {
   readonly description: string;
   readonly category: "supply";
   readonly effect: SupplyEffect;
+  /** What a merchant asks for it on floor 1; prices rise deeper down (see rules.ts). */
+  readonly price: number;
   /** Placeholder color until it has art (0xRRGGBB). */
   readonly color: number;
 }
@@ -54,6 +56,7 @@ export const SUPPLIES = [
     description: "A tin of bitter, ember-warm paste. Smoothed over a wound, it knits it closed.",
     category: "supply",
     effect: { kind: "heal", amount: 16 },
+    price: 25,
     color: 0xe0b86a,
   },
   {
@@ -63,6 +66,7 @@ export const SUPPLIES = [
       "Salve worked with crushed starstone, dark as old honey. It closes wounds that would fell anyone else.",
     category: "supply",
     effect: { kind: "heal", amount: 40 },
+    price: 60,
     color: 0xc0702a,
   },
   {
@@ -72,6 +76,7 @@ export const SUPPLIES = [
       "A splinter of the fallen star, still faintly hot. Fed to the lantern, it burns a long while.",
     category: "supply",
     effect: { kind: "charge", amount: 40 },
+    price: 30,
     color: 0xff8a3d,
   },
   {
@@ -81,6 +86,7 @@ export const SUPPLIES = [
       "A brass disc etched with the astronomers' warding marks. Snap it, and a shimmering guard wraps around you.",
     category: "supply",
     effect: { kind: "shield", amount: 12 },
+    price: 35,
     color: 0x8fc8ff,
   },
   {
@@ -90,6 +96,7 @@ export const SUPPLIES = [
       "A smooth grey stone that remembers every place it has rested. Grip it, and it carries you somewhere quiet on this floor.",
     category: "supply",
     effect: { kind: "waystone" },
+    price: 40,
     color: 0xa7b0c4,
   },
   {
@@ -99,6 +106,7 @@ export const SUPPLIES = [
       "A surveyor's lens ground from clear quartz. Held to the eye, it shows the whole floor, hidden traps and all.",
     category: "supply",
     effect: { kind: "survey" },
+    price: 30,
     color: 0x9fe6ff,
   },
   {
@@ -108,6 +116,7 @@ export const SUPPLIES = [
       "A stoppered flask of star-fire. Dashed on the floor, it bursts over every creature you can see close by.",
     category: "supply",
     effect: { kind: "flare", damage: 16, radius: 3 },
+    price: 45,
     color: 0xff5a2a,
   },
   {
@@ -117,6 +126,7 @@ export const SUPPLIES = [
       "A thick red tonic the keepers brewed for the long climb. It hardens you for the rest of the descent.",
     category: "supply",
     effect: { kind: "vigor", amount: 6 },
+    price: 110,
     color: 0xd8324a,
   },
 ] as const satisfies readonly SupplyKind[];
@@ -337,13 +347,24 @@ export function isSupply(kind: ItemKind): kind is SupplyKind {
  * inside is fixed for each cache, but only seen once it's opened.
  */
 export const CACHE = "cache" as const;
-export type LootId = ItemId | typeof CACHE;
+/** A pile of gold coins. Picking it up never needs room in the pack. */
+export const GOLD = "gold" as const;
+export type LootId = ItemId | typeof CACHE | typeof GOLD;
 
 /** Something lying on a floor, waiting to be picked up. */
 export interface FloorItem extends Point {
   /** Unique within the run, e.g. "4-i2" (floor 4, second item placed). */
   readonly id: string;
   readonly item: LootId;
+  /** How many coins, for a gold pile. */
+  readonly amount?: number;
+}
+
+/** Something a merchant sells, and how many are left. */
+export interface ShopOffer {
+  readonly item: ItemId;
+  readonly price: number;
+  readonly count: number;
 }
 
 /** A stack of identical items in one pack slot. */

@@ -79,6 +79,7 @@ const SHIELD_COLOR = 0x8fc8ff;
 const HEAL_COLOR = 0x8ff0a0;
 const LEVEL_COLOR = 0xffd45a;
 const PICKUP_COLOR = 0xffe2a8;
+const GOLD_COLOR = 0xffd45a;
 const MUTED_COLOR = 0xb8b0a8;
 const CHARGE_COLOR = 0xffc060;
 const VIGOR_COLOR = 0xff7a8a;
@@ -99,6 +100,8 @@ export interface DungeonModel {
   readonly visible: ReadonlySet<number>;
   /** How far the lantern reaches right now, in tiles. */
   readonly sightRadius: number;
+  /** The descent ended with the Beacon rekindled, so it burns. */
+  readonly won: boolean;
 }
 
 export interface DungeonViewOptions {
@@ -122,6 +125,11 @@ export class DungeonView {
   private readonly stairs = new Container();
   private readonly camp = new Sprite();
   private readonly campGlow: Sprite;
+  private readonly merchant = new Sprite();
+  private readonly beacon = new Sprite();
+  private readonly beaconGlow: Sprite;
+  /** Set once the Beacon is rekindled; it blazes from then on. */
+  private beaconLit = false;
   /** Dust stays under the actors; motes and embers float over them. */
   private readonly ground = new ParticleField(200);
   private readonly air = new ParticleField(320);
@@ -208,17 +216,24 @@ export class DungeonView {
     this.campGlow.blendMode = "add";
     this.camp.visible = false;
     this.campGlow.visible = false;
+    this.beaconGlow = new Sprite(this.glow.texture);
+    this.beaconGlow.anchor.set(0.5);
+    this.beaconGlow.blendMode = "add";
+    for (const fixture of [this.merchant, this.beacon, this.beaconGlow]) fixture.visible = false;
     this.actors.sortableChildren = true;
     this.actors.addChild(this.hero.container);
     this.effects = new EffectLayer((p) => this.world.toGlobal(p), this.glow.texture);
     this.world.addChild(
       this.stairs,
       this.camp,
+      this.merchant,
+      this.beacon,
       this.loot.traps,
       this.ground.container,
       this.glowMask,
       this.glow,
       this.campGlow,
+      this.beaconGlow,
       this.loot.items,
       this.actors,
       this.effects.world,
@@ -291,6 +306,7 @@ export class DungeonView {
       return;
     }
     this.model = model;
+    if (model.won) this.beaconLit = true;
     this.setTargets(model);
     if (!this.expectedHero || !samePoint(this.expectedHero, model.hero)) {
       // Missed or out-of-order events: jump straight to the truth.
@@ -301,6 +317,7 @@ export class DungeonView {
     this.syncCreatures(model.floor.monsters, false);
     this.loot.sync(model.floor.items, model.floor.traps, false);
     this.drawCamp(model.floor);
+    this.drawFixtures(model.floor);
     this.drawGlowMask(model.visible);
     this.drawOverlay();
   }
@@ -349,9 +366,63 @@ export class DungeonView {
             rig?.die();
             this.sparks(event.at, creatureKind(event.kind).color, 16);
             this.effects.number(this.centerOf(event.at, 0.8), `+${event.xp} xp`, LEVEL_COLOR);
+            if (event.gold > 0)
+              this.later(180, () =>
+                this.effects.label(
+                  this.centerOf(event.at, 1.25),
+                  `+${event.gold} gold`,
+                  GOLD_COLOR,
+                ),
+              );
           });
           break;
         }
+        case "gold-found": {
+          const delay = heroStepped ? this.stepMs * 0.7 : 30;
+          this.loot.pickUp(event.loot, delay);
+          this.later(delay, () => {
+            this.coinBurst(event.at, 10);
+            this.effects.label(this.centerOf(event.at, 1.05), `+${event.amount} gold`, GOLD_COLOR);
+          });
+          break;
+        }
+        case "hoard":
+          this.later(420, () => {
+            this.coinBurst(event.at, 30);
+            this.effects.ring(this.centerOf(event.at, 0.5), TILE_PIXELS * 2, GOLD_COLOR, 600);
+            this.effects.label(
+              this.centerOf(event.at, 1.3),
+              `Hoard: +${event.gold} gold`,
+              GOLD_COLOR,
+            );
+          });
+          break;
+        case "bought":
+        case "sold": {
+          const at = this.expectedHero ?? this.display;
+          this.coinBurst(at, 8);
+          this.effects.label(
+            this.centerOf(at, 1.05),
+            event.type === "bought" ? `-${event.price} gold` : `+${event.price} gold`,
+            GOLD_COLOR,
+          );
+          break;
+        }
+        case "stairs-sealed":
+        case "beacon-smothered": {
+          const at = this.expectedHero ?? this.display;
+          this.effects.ring(this.centerOf(at, 0.5), TILE_PIXELS * 1.2, 0xff6a5a, 420);
+          this.effects.label(
+            this.centerOf(at, 1.1),
+            event.type === "stairs-sealed" ? "Sealed" : "Smothered",
+            0xff9c8a,
+          );
+          if (!this.reducedMotion) this.shake = Math.max(this.shake, 1.4);
+          break;
+        }
+        case "rekindled":
+          this.rekindle(event.at);
+          break;
         case "monster-moved": {
           const rig = this.rigs.get(event.id);
           if (!rig) break;
@@ -487,6 +558,9 @@ export class DungeonView {
         case "already-equipped":
         case "dropped":
         case "cannot-drop":
+        case "cannot-afford":
+        case "sold-out":
+        case "no-merchant":
           break;
       }
     }
@@ -583,9 +657,11 @@ export class DungeonView {
     this.air.clear();
     this.effects.clear();
     this.surveyWave = null;
+    this.beaconLit = model.won;
     this.syncCreatures(model.floor.monsters, true);
     this.loot.sync(model.floor.items, model.floor.traps, true);
     this.drawCamp(model.floor);
+    this.drawFixtures(model.floor);
     this.drawGlowMask(model.visible);
     this.drawOverlay();
   }
@@ -686,6 +762,26 @@ export class DungeonView {
     }
   }
 
+  /** The merchant's stall and the Beacon, where this floor has them. */
+  private drawFixtures(floor: Floor): void {
+    const place = (sprite: Sprite, at: Point | null) => {
+      sprite.visible = at !== null;
+      if (!at) return;
+      sprite.position.set(at.x * TILE_PIXELS, at.y * TILE_PIXELS);
+      sprite.setSize(TILE_PIXELS, TILE_PIXELS);
+    };
+    this.merchant.texture = this.lootTextures.feature("merchant");
+    this.beacon.texture = this.lootTextures.feature(this.beaconLit ? "beacon-lit" : "beacon");
+    place(this.merchant, floor.merchant);
+    place(this.beacon, floor.beacon);
+    this.beaconGlow.visible = floor.beacon !== null;
+    if (floor.beacon)
+      this.beaconGlow.position.set(
+        (floor.beacon.x + 0.5) * TILE_PIXELS,
+        (floor.beacon.y + 0.4) * TILE_PIXELS,
+      );
+  }
+
   private drawCamp(floor: Floor): void {
     const camp = floor.camp;
     this.camp.visible = camp !== null;
@@ -750,6 +846,23 @@ export class DungeonView {
       mark.visible = tile.visible;
       mark.alpha = tile.alpha;
       mark.tint = tile.tint;
+    }
+    for (const [sprite, at] of [
+      [this.merchant, this.model?.floor.merchant],
+      [this.beacon, this.model?.floor.beacon],
+    ] as const) {
+      if (!at || !sprite.visible) continue;
+      const tile = this.tiles[indexOf(at)] as Sprite;
+      sprite.alpha = tile.visible ? tile.alpha : 0;
+      sprite.tint = tile.tint;
+    }
+    const beacon = this.model?.floor.beacon;
+    if (beacon) {
+      // Cold embers until rekindled; then a great blaze.
+      const blaze = flicker(seconds * 1.3 + 7, this.reducedMotion ? 0.3 : 1.4);
+      const seen = this.sight[indexOf(beacon)] ?? 0;
+      this.beaconGlow.setSize(TILE_PIXELS * (this.beaconLit ? 9 : 1.6) * blaze);
+      this.beaconGlow.alpha = this.beaconLit ? 0.8 * blaze : seen * 0.25 * blaze;
     }
     const camp = this.model?.floor.camp;
     if (camp && this.camp.visible) {
@@ -1012,6 +1125,30 @@ export class DungeonView {
           this.effects.number(this.centerOf(event.at, 0.9), `-${event.drained}`, color);
         break;
     }
+  }
+
+  /** The Beacon blazes back to life: the end of the descent. */
+  private rekindle(at: Point): void {
+    this.beaconLit = true;
+    this.beacon.texture = this.lootTextures.feature("beacon-lit");
+    const center = this.centerOf(at, 0.5);
+    for (const [delay, radius] of [
+      [0, 3],
+      [200, 6],
+      [450, 10],
+    ] as const) {
+      this.later(delay, () => this.effects.ring(center, TILE_PIXELS * radius, LEVEL_COLOR, 900));
+    }
+    this.flareBurst(at);
+    this.later(250, () => this.flareBurst(at));
+    this.sparks(at, LEVEL_COLOR, 40, true);
+    this.effects.number(this.centerOf(at, 1.4), "The Beacon burns!", LEVEL_COLOR, true);
+    if (!this.reducedMotion) this.shake = Math.max(this.shake, 3);
+  }
+
+  /** Coins glinting up from a tile. */
+  private coinBurst(tile: Point, count: number): void {
+    this.sparks(tile, GOLD_COLOR, count, true);
   }
 
   /** Fire leaping up from a tile: a flare bursting, or an ember vent going off. */

@@ -17,7 +17,7 @@ import { SaveStore } from "./save-store";
 
 /** When set, the app renders once, saves a screenshot and report to this path, then quits. */
 const smokeScreenshotPath = process.env.EMBERCRAWL_SMOKE_SCREENSHOT;
-const SMOKE_SCENES: readonly Scene[] = ["title", "game", "pack"];
+const SMOKE_SCENES: readonly Scene[] = ["title", "game", "pack", "shop"];
 const smokeScene: Scene =
   SMOKE_SCENES.find((scene) => scene === process.env.EMBERCRAWL_SMOKE_SCENE) ?? "title";
 

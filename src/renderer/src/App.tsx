@@ -6,11 +6,12 @@ import { GameScreen } from "./screens/GameScreen";
 import { TitleScreen } from "./screens/TitleScreen";
 
 /**
- * `#scene=game` opens the most recent character on launch, and `#scene=pack` also opens its pack;
+ * `#scene=game` opens the most recent character on launch, and `#scene=pack` or `#scene=shop`
+ * also opens its pack or the merchant's panel;
  * the smoke test uses them.
  */
 const launchScene = new URLSearchParams(window.location.hash.slice(1)).get("scene");
-let openGameOnLaunch = launchScene === "game" || launchScene === "pack";
+let openGameOnLaunch = launchScene === "game" || launchScene === "pack" || launchScene === "shop";
 
 function reportReady(details: ReadyDetails): void {
   window.embercrawl?.signalReady(details);
@@ -18,7 +19,7 @@ function reportReady(details: ReadyDetails): void {
 
 export function App() {
   const [playing, setPlaying] = useState<CharacterSave | null>(null);
-  const [startWithPack, setStartWithPack] = useState(false);
+  const [startWith, setStartWith] = useState<"pack" | "shop" | undefined>(undefined);
 
   if (playing) {
     return (
@@ -26,7 +27,7 @@ export function App() {
         key={playing.id}
         initial={playing}
         saves={saveService}
-        startWithPack={startWithPack}
+        startWith={startWith}
         onExit={() => setPlaying(null)}
         onReady={reportReady}
       />
@@ -39,7 +40,8 @@ export function App() {
       saves={saveService}
       autoContinue={autoContinue}
       onPlay={(save) => {
-        setStartWithPack(autoContinue && launchScene === "pack");
+        if (autoContinue && (launchScene === "pack" || launchScene === "shop"))
+          setStartWith(launchScene);
         openGameOnLaunch = false;
         setPlaying(save);
       }}

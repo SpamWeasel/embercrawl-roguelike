@@ -8,7 +8,7 @@ import {
 export interface GameKeyHandlers {
   move(direction: Direction): void;
   wait(): void;
-  /** Use whatever is underfoot: stairs, a camp, or an item to pick up. */
+  /** Use whatever is underfoot: stairs, a camp, a merchant, the Beacon, or an item to pick up. */
   interact(): void;
   toggleLight(): void;
   pulse(): void;
@@ -17,6 +17,10 @@ export interface GameKeyHandlers {
   inventory(): void;
   /** Use (or equip) what's in a pack slot, numbered from 0. */
   itemSlot(slot: number): void;
+  /** Show, enlarge or hide the map. */
+  map(): void;
+  /** Open the how-to-play card. */
+  help(): void;
 }
 
 /**
@@ -167,6 +171,12 @@ export function useGameKeys(handlers: GameKeyHandlers, enabled: boolean): void {
       } else if (code === "Escape") {
         event.preventDefault();
         if (!event.repeat) latest.current.menu();
+      } else if (code === "KeyM") {
+        event.preventDefault();
+        if (!event.repeat) latest.current.map();
+      } else if (code === "KeyH") {
+        event.preventDefault();
+        if (!event.repeat) latest.current.help();
       } else if (INVENTORY_KEYS.has(code)) {
         event.preventDefault();
         if (!event.repeat) latest.current.inventory();

@@ -6,7 +6,9 @@ import {
   type FloorItem,
   type GearId,
   type GearKind,
+  GOLD,
   type LootId,
+  type ShopOffer,
   SUPPLIES,
   type SupplyId,
   TRAPS,
@@ -21,10 +23,18 @@ import {
   creatureCount,
   GEAR_FIRST_FLOOR,
   GEAR_SLOT_BIAS,
+  gearPrice,
   gearWeight,
+  goldPileCount,
+  goldPileRange,
   hasCache,
+  hasMerchant,
   NEW_CREATURE_WINDOW,
+  priceAt,
   recoverySupply,
+  SHOP_GEAR_LEAD,
+  SHOP_SUPPLY_OFFERS,
+  SHOP_SUPPLY_STOCK,
   SPAWN_CLEARANCE,
   scaledStats,
   supplyCount,
@@ -56,10 +66,18 @@ export interface Floor {
   readonly items: readonly FloorItem[];
   /** Traps not yet sprung, found or hidden. */
   readonly traps: readonly Trap[];
+  /** A merchant's stall (every third floor): warded like a camp, and where trading happens. */
+  readonly merchant: Point | null;
+  /** What the merchant has for sale. Empty on floors without one. */
+  readonly stock: readonly ShopOffer[];
+  /** The Beacon, on the final floor only: rekindling it wins the descent. */
+  readonly beacon: Point | null;
 }
 
 /** The camp sits between this share and the next of the farthest walking distance from the entrance. */
 const CAMP_DISTANCE_SHARE = [0.3, 0.7] as const;
+/** The merchant's stall sits between these shares of the farthest walking distance. */
+const MERCHANT_DISTANCE_SHARE = [0.25, 0.8] as const;
 
 /** The map is a 4 × 2 grid of 8 × 8 cells; each holds a room or a corridor junction. */
 const CELL_COLUMNS = 4;
@@ -117,6 +135,15 @@ export function generateFloor(seed: number, depth: number): Floor {
   const monsters = spawnCreatures(rng, depth, tiles, distances, reserved);
   const items = placeItems(rng, depth, tiles, entrance, [...reserved, ...monsters]);
   const traps = placeTraps(rng, depth, tiles, distances, [...reserved, ...monsters, ...items]);
+  const used = () => [...reserved, ...monsters, ...items, ...traps];
+  const gold = placeGold(rng, depth, tiles, used());
+  items.push(...gold);
+  const merchant = hasMerchant(depth) ? pickMerchant(rng, distances, roomTiles, used()) : null;
+  const stock = merchant ? stockStall(rng, depth) : [];
+  const beacon =
+    depth === FLOOR_COUNT
+      ? pickBeacon(rng, distances, roomTiles, [...used(), ...(merchant ? [merchant] : [])])
+      : null;
 
   return {
     depth,
@@ -130,7 +157,97 @@ export function generateFloor(seed: number, depth: number): Floor {
     monsters,
     items,
     traps,
+    merchant,
+    stock,
+    beacon,
   };
+}
+
+/** Gold piles anywhere on open floor. */
+function placeGold(
+  rng: Rng,
+  depth: number,
+  tiles: readonly TileKind[],
+  taken: readonly Point[],
+): FloorItem[] {
+  const free = freeTiles(tiles, taken);
+  const [low, high] = goldPileRange(depth);
+  const piles: FloorItem[] = [];
+  for (let i = 0; i < goldPileCount(depth) && free.length > 0; i++) {
+    const at = rng.pick(free);
+    free.splice(free.indexOf(at), 1);
+    piles.push({
+      id: `${depth}-g${i + 1}`,
+      item: GOLD,
+      x: at.x,
+      y: at.y,
+      amount: rng.int(low, high),
+    });
+  }
+  return piles;
+}
+
+/** A free room tile partway through the floor, so the stall is found on the way down. */
+function pickMerchant(
+  rng: Rng,
+  distances: readonly number[],
+  roomTiles: readonly Point[],
+  taken: readonly Point[],
+): Point | null {
+  return pickByDistance(rng, distances, roomTiles, taken, MERCHANT_DISTANCE_SHARE);
+}
+
+/** The Beacon stands at the far end of the final floor. */
+function pickBeacon(
+  rng: Rng,
+  distances: readonly number[],
+  roomTiles: readonly Point[],
+  taken: readonly Point[],
+): Point | null {
+  return pickByDistance(rng, distances, roomTiles, taken, [STAIRS_FAR_SHARE, 1]);
+}
+
+/** A free room tile within a share of the farthest walking distance, or any free room tile. */
+function pickByDistance(
+  rng: Rng,
+  distances: readonly number[],
+  roomTiles: readonly Point[],
+  taken: readonly Point[],
+  [low, high]: readonly [number, number],
+): Point | null {
+  const free = roomTiles.filter(
+    (p) => (distances[indexOf(p)] ?? -1) > 0 && !taken.some((t) => samePoint(t, p)),
+  );
+  if (free.length === 0) return null;
+  const farthest = Math.max(...free.map((p) => distances[indexOf(p)] ?? 0));
+  const band = free.filter((p) => {
+    const share = (distances[indexOf(p)] ?? 0) / farthest;
+    return share >= low && share <= high;
+  });
+  return rng.pick(band.length > 0 ? band : free);
+}
+
+/** A few supplies (more than one of some) and one weapon and one armor from a little ahead. */
+function stockStall(rng: Rng, depth: number): ShopOffer[] {
+  const offers: ShopOffer[] = [];
+  const pool = SUPPLIES.filter((s) => supplyWeight(s.id, depth) > 0);
+  for (let i = 0; i < SHOP_SUPPLY_OFFERS; i++) {
+    const available = pool.filter((s) => !offers.some((o) => o.item === s.id));
+    if (available.length === 0) break;
+    const supply = weightedPick(rng, available, (s) => supplyWeight(s.id, depth));
+    offers.push({
+      item: supply.id,
+      price: priceAt(supply.price, depth),
+      count: rng.int(1, SHOP_SUPPLY_STOCK),
+    });
+  }
+  const weapons: readonly GearKind[] = WEAPONS;
+  const armors: readonly GearKind[] = ARMORS;
+  for (const list of [weapons, armors]) {
+    const gear = pickGearFrom(rng, list, depth + SHOP_GEAR_LEAD);
+    offers.push({ item: gear.id as GearId, price: priceAt(gearPrice(gear.tier), depth), count: 1 });
+  }
+  return offers;
 }
 
 /** Open floor tiles (not stairs) that nothing else is using. */
@@ -191,19 +308,23 @@ export function pickSupply(rng: Rng, depth: number): SupplyId {
 }
 
 /** Even floors favor weapons and odd floors armor; recent tiers are the most common. */
-function pickGear(rng: Rng, depth: number): GearId {
+export function pickGear(rng: Rng, depth: number): GearId {
   const weapons: readonly GearKind[] = WEAPONS;
   const armors: readonly GearKind[] = ARMORS;
   const [favored, other] = depth % 2 === 0 ? [weapons, armors] : [armors, weapons];
-  const found = (rng.chance(GEAR_SLOT_BIAS) ? favored : other).filter((g) => !g.starter);
-  const guardianFloor = CREATURES.some((c) => "guardian" in c && c.firstFloor === depth);
-  const pool = found.filter((g) => gearWeight(g.tier, depth, guardianFloor) > 0);
+  return pickGearFrom(rng, rng.chance(GEAR_SLOT_BIAS) ? favored : other, depth).id as GearId;
+}
+
+/** One piece from `list` suited to `depth` (see gearWeight). */
+function pickGearFrom(rng: Rng, list: readonly GearKind[], depth: number): GearKind {
+  const found = list.filter((g) => !g.starter);
+  const level = Math.min(depth, FLOOR_COUNT);
+  const guardianFloor = CREATURES.some((c) => "guardian" in c && c.firstFloor === level);
+  const pool = found.filter((g) => gearWeight(g.tier, level, guardianFloor) > 0);
   // Every floor in the game has gear in reach; this fallback only guards against catalog changes.
-  const chosen =
-    pool.length > 0
-      ? weightedPick(rng, pool, (g) => gearWeight(g.tier, depth, guardianFloor))
-      : (found.filter((g) => g.tier <= depth).at(-1) ?? (found[0] as GearKind));
-  return chosen.id as GearId;
+  return pool.length > 0
+    ? weightedPick(rng, pool, (g) => gearWeight(g.tier, level, guardianFloor))
+    : (found.filter((g) => g.tier <= level).at(-1) ?? (found[0] as GearKind));
 }
 
 /** Hidden traps anywhere on open floor, though never right by the entrance. */

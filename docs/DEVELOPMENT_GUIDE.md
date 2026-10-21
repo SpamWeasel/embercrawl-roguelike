@@ -1,7 +1,7 @@
 # Embercrawl development guide
 
 How every mechanism in Embercrawl works, where it lives in the code, and how to change it safely.
-Written for version 0.4.0 (milestone 4). `docs/PLAN.md` says *what* we're building and why; this
+Written for version 0.5.0 (milestone 5). `docs/PLAN.md` says *what* we're building and why; this
 guide says *how it works now*. Update both when a mechanic changes.
 
 ## Contents
@@ -14,9 +14,9 @@ guide says *how it works now*. Update both when a mechanic changes.
 6. [The lantern and sight](#6-the-lantern-and-sight)
 7. [Creatures](#7-creatures)
 8. [Camps](#8-camps)
-9. [Items and the pack](#9-items-and-the-pack)
+9. [Items, the pack, gold and merchants](#9-items-the-pack-gold-and-merchants)
 10. [Traps](#10-traps)
-11. [Death, characters and records](#11-death-characters-and-records)
+11. [Guardians, the Beacon, death and records](#11-guardians-the-beacon-death-and-records)
 12. [Saves](#12-saves)
 13. [Presentation: palettes, animation and art](#13-presentation-palettes-animation-and-art)
 14. [Controls](#14-controls)
@@ -95,6 +95,7 @@ Where the important code lives:
 | Save format and upgrades | `src/engine/save.ts` |
 | Message log wording | `src/renderer/src/game/messages.ts` |
 | Tooltip and item wording | `src/renderer/src/game/itemText.ts` |
+| The balance bot | `src/bot/bot.ts` (run with `scripts/balance.mts`) |
 | Keys | `src/renderer/src/input/useGameKeys.ts` |
 | Walking speed and key repeat | `src/renderer/src/game/timing.ts` |
 
@@ -105,11 +106,11 @@ Where the important code lives:
 ### What happens in one turn (`applyAction` in `run.ts`)
 
 1. **The hero acts.** Move, attack (moving into a creature), wait, rest, toggle the lantern,
-   pulse, pick up, use or equip an item, or drop an item.
+   pulse, pick up, use or equip an item, drop an item, buy, sell, or rekindle the Beacon.
    - If the action couldn't happen (walking into a wall, a wasted salve, nothing to pick up), the
      game returns the *same* state with `tookTurn: false`. No time passes; creatures don't act.
    - After a step onto a new tile: a hidden or known **trap** there springs, then any **item**
-     there is picked up.
+     there is picked up (gold goes straight into the purse).
 2. **The lantern burns.** The turn counter goes up by one; bright light costs 1 charge.
 3. **Creatures act**, nearest first (see [section 7](#7-creatures)).
 4. **The hero looks around** (`look` in `run.ts`): newly visible tiles become explored, bright
@@ -126,6 +127,8 @@ afterwards).
 | **Floor stream** | `Rng.derive(seed, "floor", depth)` | Layout, stairs, camp, creatures, items, traps | No: regenerated from the seed |
 | **Gameplay stream** | `Rng.derive(seed, "play")`, then carried in `run.rng` | Hit rolls, erratic steps, Waystone landing | Yes, in the save |
 | Cache contents | `Rng.derive(seed, "cache", cacheId)` | What a supply cache holds | No: fixed per cache |
+| Spoils | `Rng.derive(seed, "spoils", creatureId)` | Gold a creature drops | No: fixed per creature |
+| Hoards | `Rng.derive(seed, "hoard", guardianId)` | The gear a guardian leaves | No: fixed per guardian |
 | Palettes | `Rng.derive(seed, "palette", group)` | Which colors a group of floors uses | No |
 
 Because each floor has its own stream, a floor comes out identical no matter when you reach it.
@@ -133,7 +136,7 @@ Cosmetic effects (sparks, motes, flicker) use `Math.random()` in the renderer; t
 the game.
 
 > **Ordering rule:** inside a floor's generation, things are drawn in a fixed order: layout,
-> stairs, camp, creatures, items, traps. New content must always be drawn *after* existing
+> stairs, camp, creatures, items, traps, gold piles, the merchant (and stock), the Beacon. New content must always be drawn *after* existing
 > content, or every existing seed's floors would change.
 
 ---
@@ -159,10 +162,13 @@ File: `src/engine/generate.ts`. Constants at the top of the file; counts in `rul
 | Down stairs | A room tile at least **70%** of the farthest walking distance from the entrance (`STAIRS_FAR_SHARE`). None on floor 30. |
 | Camp | A room tile between **30% and 70%** of the farthest walking distance (`CAMP_DISTANCE_SHARE`). |
 | Creatures | On plain floor more than **6 steps** from the entrance (`SPAWN_CLEARANCE`). See [section 7](#7-creatures). |
-| Items | On plain floor not used by anything else, spread apart where possible. See [section 9](#9-items-and-the-pack). |
+| Items | On plain floor not used by anything else, spread apart where possible. See [section 9](#9-items-the-pack-gold-and-merchants). |
 | Traps | On plain floor more than **3 steps** from the entrance (`TRAP_CLEARANCE`). See [section 10](#10-traps). |
+| Gold piles | On free plain floor. See [section 9](#9-items-the-pack-gold-and-merchants). |
+| Merchant | Floors 3, 6, … 27: a free room tile between **25% and 80%** of the farthest walking distance (`MERCHANT_DISTANCE_SHARE`). |
+| Beacon | Floor 30 only: a free room tile at least **70%** of the farthest walking distance. |
 
-Items, traps, creatures, the camp and stairs never share a starting tile.
+Items, gold, traps, creatures, the camp, the merchant, the Beacon and stairs never share a starting tile.
 
 ---
 
@@ -256,12 +262,15 @@ A floor draws from creatures whose first floor is within the last **10 floors**
 
 ```text
 steps   = floor − creature's first floor
-health  = round(base health × (1 + 0.08 × steps) × variance)   variance 0.90–1.15 (guardians 1.0)
-attack  = round((base attack + floor(steps ÷ 3)) × 0.9)
+health  = round(base health × (1 + 0.105 × steps) × variance)  variance 0.90–1.15 (guardians 1.0)
+attack  = round((base attack + floor(steps ÷ 3)) × (1.02 + 0 × floor))
 ```
 
-The `× 0.9` (`CREATURE_ATTACK_FACTOR`) softens all creature attacks a little; the balance pass in
-milestone 5 decides whether it stays.
+The three numbers are the balance bot's main dials (see [section 16](#16-testing-and-tools)):
+`CREATURE_HP_PER_FLOOR` (0.105), `CREATURE_ATTACK_BASE` (1.02) and `CREATURE_ATTACK_PER_FLOOR`
+(0, an unused dial that makes attack grow with depth). Attack is a coarse dial: because attacks
+are rounded, a change of 0.01 can push many creatures up a whole point at once (1.02 gave the bot
+51% wins, 1.03 only 17%). Health is the finer dial.
 
 ### Behaviors
 
@@ -287,6 +296,10 @@ They never set off traps.
 
 ### Roster (base stats, before depth scaling)
 
+The last few creatures' attacks were lowered in milestone 5 (Star Eater 19→18, Cinder Oracle
+19→16, Ruin Colossus 25→21, Null Shade 23→20): they jumped far above the best armor and made
+floors 26–30 a wall that ended almost every run.
+
 | Creature | Floor | Health | Attack | XP | Behavior |
 |---|---:|---:|---:|---:|---|
 | Cinder Mite | 1 | 9 | 4 | 6 | Chase |
@@ -309,10 +322,10 @@ They never set off traps.
 | Thorn Matron | 18 | 48 | 16 | 50 | Chase |
 | **Orrery Knight** (guardian) | 20 | 150 | 21 | 180 | Slow |
 | Void Tick | 21 | 40 | 17 | 52 | Swift |
-| Star Eater | 22 | 58 | 19 | 58 | Chase |
-| Cinder Oracle | 24 | 46 | 19 | 62 | Ranged |
-| Ruin Colossus | 25 | 88 | 25 | 72 | Slow |
-| Null Shade | 27 | 54 | 23 | 74 | Erratic |
+| Star Eater | 22 | 58 | 18 | 58 | Chase |
+| Cinder Oracle | 24 | 46 | 16 | 62 | Ranged |
+| Ruin Colossus | 25 | 88 | 21 | 72 | Slow |
+| Null Shade | 27 | 54 | 20 | 74 | Erratic |
 | **Beacon Warden** (guardian) | 30 | 260 | 28 | 320 | Slow |
 
 ---
@@ -329,7 +342,7 @@ charge = min(missing charge, 30)                          (CAMP_CHARGE)
 
 ---
 
-## 9. Items and the pack
+## 9. Items, the pack, gold and merchants
 
 Catalog: `src/engine/items.ts`. How often things appear: `rules.ts`. Use, equip, drop and pick-up
 logic: `run.ts`.
@@ -418,6 +431,33 @@ before opening.
   item.
 - Using, equipping and dropping each take a turn, so creatures get to respond.
 
+### Gold
+
+| Source | Amount | Function |
+|---|---|---|
+| Gold piles per floor | 3 + floor(floor ÷ 6) | `goldPileCount` |
+| Coins in a pile | (3 + floor) to (8 + 2 × floor) | `goldPileRange` |
+| Each creature slain | 1 + random 0–3 + floor(floor ÷ 3), fixed per creature | `killGold` |
+| A guardian's hoard | 40 + 8 × floor, plus a piece of gear from 3 floors ahead | `guardianHoard`, `GUARDIAN_GEAR_LEAD` |
+
+Gold goes straight into the purse (`run.gold`), never the pack, so a full pack never blocks it.
+
+### Merchants
+
+- A merchant keeps a **stall on floors 3, 6, 9 … 27** (`hasMerchant`). The stall is **warded**
+  like a camp: creatures can't step on it or strike someone standing there.
+- **Stock**, fixed when the floor is made: 4 different supplies, 1–3 of each (chosen with the
+  floor's supply weights), plus one weapon and one armor from **2 floors ahead**
+  (`SHOP_SUPPLY_OFFERS`, `SHOP_SUPPLY_STOCK`, `SHOP_GEAR_LEAD`).
+- **Prices:** an item's base price rises **8% per floor** (`priceAt`). Supplies have their own
+  base price in `items.ts` (Salve 25, Deep Salve 60, Ember Shard 30, Ward Sigil 35, Waystone 40,
+  Survey Lens 30, Flare Flask 45, Vigor Draught 110); weapons and armor cost
+  **50 + 30 × the floor they start appearing on** (`gearPrice`).
+- **Selling:** merchants pay **40%** of an item's base price (`SELL_SHARE`, `sellPrice`), with no
+  depth rise. Worn gear can't be sold; swap it into the pack first.
+- Buying needs the gold and room in the pack. Each buy or sale takes a turn (safe on the stall).
+- Stand on the stall and press Enter to open the merchant's panel (`ShopPanel.tsx`).
+
 ---
 
 ## 10. Traps
@@ -445,12 +485,25 @@ traps per floor = 0 on floor 1, otherwise min(5, 1 + floor(floor number ÷ 7))  
 
 ---
 
-## 11. Death, characters and records
+## 11. Guardians, the Beacon, death and records
+
+### Guardians and the Beacon
+
+- Floors 10 and 20 each have a **guardian** (Chain Sexton, Orrery Knight). While it lives, the
+  **stairs down are sealed** (`livingGuardian`, the `sealedBy` field of the stairs prompt).
+- A slain guardian leaves a **hoard**: gold (see [section 9](#9-items-the-pack-gold-and-merchants))
+  and a piece of gear from 3 floors ahead, dropped where it fell (or the nearest free tile).
+- Floor 30 has no stairs down. Its far end holds **the Beacon**, guarded by the **Beacon Warden**.
+  Once the Warden has fallen, standing on the Beacon and pressing Enter **rekindles** it: the
+  descent is won (`status: "won"`), the victory screen appears, and the character's record counts
+  the win.
+
+### Death and records
 
 - Health 0 ends the descent (`status: "dead"`, with `killedBy` naming the creature or trap). The
   death screen appears after a short pause so the fall animation plays.
 - **The character survives.** Each character keeps a record across descents: descents started,
-  deepest floor, deaths and the bestiary (every creature kind ever seen). "Begin a new descent"
+  deepest floor, deaths, wins and the bestiary (every creature kind ever seen). "Begin a new descent"
   starts a fresh run from floor 1 with a new seed and the starting gear.
 - Multiple characters, each in its own save file, are listed on the title screen. The first one
   ("Wanderer") is created automatically.
@@ -470,13 +523,14 @@ File: `src/engine/save.ts` (format), `src/main/save-store.ts` (writing files).
 - A save stores the run's state, including every visited floor, but **not** catalog data: an
   item is stored by id, so changing a salve's healing changes it in existing saves too.
 
-**Format versions** (`SAVE_VERSION`, now 3):
+**Format versions** (`SAVE_VERSION`, now 4):
 
 | Version | Milestone | Added | Upgrade from the previous version |
 |---|---|---|---|
 | 1 | 1 | Exploration | — |
 | 2 | 3 | Combat, creatures, lantern, camps, bestiary | Full health, level 1, full lantern; visited floors stay empty of creatures |
 | 3 | 4 | Items, pack, gear, traps | Starting gear and empty pack; visited floors get the items and traps they were generated with |
+| 4 | 5 | Gold, merchants, sealed stairs, the Beacon, victory, wins | Empty purse, no wins yet; visited floors get their gold piles (never on a tile already holding something), merchant, stock and Beacon |
 
 **Changing the save format** (required whenever `RunState`, `Floor` or the record changes shape):
 
@@ -520,6 +574,15 @@ lens reveals the floor as a ripple; traps burst with fire, alarm rings or gloom.
 through black with a "Floor N · Region" banner. Everything respects the system's *reduce motion*
 setting.
 
+### The minimap (`screens/game/Minimap.tsx`)
+
+The floor as explored so far, in the top right corner, drawn in the floor's own colors (brighter
+where the lantern reaches now), with markers: the hero (white), stairs down (orange) and up
+(blue), the camp, the merchant (green), the Beacon (pale gold), items and gold seen, found traps
+(violet) and creatures in view (red). Three sizes: small (5 pixels a tile), large (9) and hidden;
+**M** cycles them, the buttons on the map do the same, and the choice is remembered on the PC.
+Clicking the map walks there. It hides while the pack or the merchant's panel is open.
+
 ### Art
 
 Drop a transparent PNG (ideally 128 × 128) named after the thing's id, and it replaces the drawn
@@ -532,6 +595,8 @@ placeholder automatically:
 | Traps | `src/renderer/src/assets/sprites/traps/<id>.png` | `items.ts` (`TRAPS`) |
 
 The hero and stairs are `hero.png`, `stairs-down.png` and `stairs-up.png` in `assets/sprites/`.
+The merchant's stall and the Beacon are `merchant.png`, `beacon.png` and `beacon-lit.png` there
+too; gold piles are `items/gold.png`.
 
 ---
 
@@ -542,17 +607,21 @@ The hero and stairs are `hero.png`, `stairs-down.png` and `stairs-up.png` in `as
 | Move | WASD or arrows; two at once for diagonals; Q E Z C; number pad 1–9 |
 | Attack | Move into a creature |
 | Wait | Space, `.` or number pad 5 |
-| Stairs, rest, pick up | Enter (or click the tile you stand on) |
+| Stairs, rest, trade, rekindle, pick up | Enter (or click the tile you stand on) |
 | Lantern bright/dim | L |
 | Pulse | F |
 | Use or equip pack slot | 1–9, 0 (or click the slot) |
 | Open the pack | I or Tab |
 | In the pack | Arrows/WASD select, Enter use, X drop, Esc/I/Tab close |
+| At a merchant | Up/down or W/S select, Enter buy or sell, Esc close |
+| Map: small, large, hidden | M (or the buttons on the map) |
+| How to play | H (or from the menu and title screen) |
 | Walk somewhere | Click an explored tile (any key stops the walk; danger stops it too) |
 | Menu | Esc |
 | Fullscreen | F11 or Alt+Enter |
 
-Key handling: `input/useGameKeys.ts` (dungeon) and `screens/game/InventoryPanel.tsx` (pack).
+Key handling: `input/useGameKeys.ts` (dungeon), `screens/game/InventoryPanel.tsx` (pack) and
+`screens/game/ShopPanel.tsx` (merchant).
 
 ---
 
@@ -608,8 +677,11 @@ existing seeds (purely visual).
 
 ### Make the game easier or harder overall
 
-Good levers, roughly from gentlest to strongest: healing amounts and recovery supplies; camp
-healing; `CREATURE_ATTACK_FACTOR`; creature count; starting health and level gains; gear power.
+Measure first: run `pnpm balance` (see [section 16](#16-testing-and-tools)) before and after.
+Good levers, roughly from gentlest to strongest: `CREATURE_HP_PER_FLOOR` (the finest dial);
+healing amounts and recovery supplies; camp healing; gold and prices (the bot relies on buying
+gear upgrades: steeper prices cut its wins from 26% to 8%); creature count; starting health and
+level gains; gear power; `CREATURE_ATTACK_BASE` (coarse: see section 7).
 
 ---
 
@@ -618,11 +690,12 @@ healing; `CREATURE_ATTACK_FACTOR`; creature count; starting health and level gai
 | Command | What it does |
 |---|---|
 | `pnpm check` | Type checks, lint and all tests |
-| `pnpm smoke` | Builds and launches the real app three times (title, game, game with pack open); fails on any error; screenshots in `.smoke/` |
+| `pnpm smoke` | Builds and launches the real app four times (title, game, game with the pack open, game with the merchant's panel open); fails on any error; screenshots in `.smoke/` |
+| `pnpm balance 200 1` | The balance bot plays 200 whole descents (seeds 1–200) and reports the win rate, where runs end and what kills them |
 | `pnpm dev:web` | Runs the game in a browser at http://localhost:5173 (saves in the browser) |
 | `pnpm dev` | Runs the desktop app with hot reload |
 | `pnpm dist` | Builds into `release/<version>/`, for x64 and ARM64 each: `Embercrawl-<version>-<arch>.zip` (unzip and run `Embercrawl.exe`, no install), `Embercrawl-<version>-portable-<arch>.exe` (one file, no install, unpacks itself on each launch so it starts a little slower) and `Embercrawl-Setup-<version>-<arch>.exe` (installer). All keep saves in `%APPDATA%\Embercrawl`. |
-| `pnpm exec tsx scripts/demo-saves.mts .demo --showcase 4 14` | Makes demo characters already on chosen floors (see `CLAUDE.md` to launch them) |
+| `pnpm exec tsx scripts/demo-saves.mts .demo --showcase 4 14` | Makes demo characters already on chosen floors (see `CLAUDE.md` to launch them); `--merchant` stands one at a merchant with gold, `--won` makes a won floor 30 |
 
 Test files (`tests/`):
 
@@ -635,10 +708,39 @@ Test files (`tests/`):
 | `engine/run.test.ts` | Moving, waiting, stairs |
 | `engine/combat.test.ts` | Attacks, creature behaviors, lantern, pulse, camps, death |
 | `engine/items.test.ts` | Catalog, pack, floor contents, supplies, gear, dropping, traps |
+| `engine/descent.test.ts` | Gold, merchants, guardians sealing the stairs, the Beacon, victory, the version-3 upgrade |
+| `engine/bot.test.ts` | The balance bot finishes whole descents without getting stuck |
 | `engine/save.test.ts` | Save format, upgrades from real version-1 and version-2 saves |
 | `engine/fuzz.test.ts` | Thousands of random actions, checking the rules never break |
 | `main/save-store.test.ts` | Writing save files safely |
 | `renderer/palettes.test.ts`, `motion.test.ts` | Palettes and animation helpers |
+
+### The balance bot (`src/bot/bot.ts`, `scripts/balance.mts`)
+
+The plan's target is that **a fixed, simple bot wins 25–35% of runs**, measured on seeds kept
+apart from tuning. The bot sees only what a player would (explored tiles, creatures in view) and
+plays through the normal rules. Each turn, in order, it:
+
+1. heals when at 45% health or less, drinks vigor draughts, and refills a lantern at 50 or less;
+2. fights anything adjacent (a flare if 2+ are near, a pulse if surrounded or about to be struck,
+   a ward sigil when hurt), otherwise hits the weakest;
+3. equips better gear from the pack;
+4. closes in on creatures that have noticed it;
+5. rests at the camp below 65% health, and trades at a merchant (sells outgrown gear, buys gear
+   upgrades, then healing until it carries 4);
+6. picks up gold and items it has seen;
+7. on floor 30, rekindles the Beacon once the Warden has fallen;
+8. explores the whole floor, fights any guardian sealing the stairs, then goes down.
+
+It never dodges telegraphed strikes, so a careful player should do better than it. When
+creatures block the only way, it fights through them; if it paces over the same few tiles for 60
+turns, it stops exploring that floor and heads down.
+
+`pnpm balance [runs] [first seed]` plays descents on all but one CPU core (about 40 seconds for
+200 on the owner's PC). **Tuning seeds** are 1–300; **check seeds** start at 100001. Milestone 5's
+result (version 0.5.0): **30.7%** wins on 300 tuning seeds and **33.0%** on 300 check seeds.
+Losses cluster at the two guardians (floors 6–10 and 16–20) and the finale (26–30), with few on
+floors 1–5. Winners reach level 22 in about 4,600 turns.
 
 ---
 
@@ -656,6 +758,8 @@ the owner's art fits), and its rules as a starting point, then improves on them.
 | 2 | `1c2c152` | 0.2.0 | Feel pass: gliding steps, camera, lantern lighting, particles, input queuing, fullscreen, crisp scaling |
 | 3 | `e098733` | 0.3.0 | Combat, 25 creatures with five behaviors, telegraphed strikes, leveling, lantern pulse, camps, death and new descents, story card |
 | 4 | `773d2b9` | 0.4.0 | Items, the pack, weapons and armor, caches, traps, tooltips and comparisons |
+| — | `28725ae` | 0.4.0 | No-install builds: a zip and a portable exe alongside the installer |
+| 5 | (this milestone) | 0.5.0 | Gold, merchants, guardians sealing the stairs, the Beacon and victory, the balance bot and tuning, the minimap, how-to-play, the version on the title screen |
 
 Key decisions along the way (details in `docs/PLAN.md`):
 
@@ -667,6 +771,8 @@ Key decisions along the way (details in `docs/PLAN.md`):
 - **Pure, seeded engine** separated from drawing, so every rule is tested and games reproduce.
 - **Telegraphed creature strikes**, so diagonal movement doesn't make fights unfair.
 - **Bright light reveals traps** (milestone 4), tying exploring to the lantern.
+- **Guardians seal the stairs** (milestone 5), so floors 10 and 20 are real checkpoints.
+- **Balance by measurement** (milestone 5): numbers are tuned with the bot, not by feel.
 
 ---
 
@@ -674,9 +780,7 @@ Key decisions along the way (details in `docs/PLAN.md`):
 
 From the plan's later milestones:
 
-- **Milestone 5:** a whole run end to end: guardian rules, the final objective and victory on
-  floor 30, shops (and gold to spend in them), achievements, and a balance bot that plays many
-  runs to tune the numbers above toward a 25–35% win rate.
+- **Achievements and run history** (planned with the full descent; not built yet).
 - **Milestone 6:** character management (export/import, backups, rename, delete), settings, key
   remapping and gamepads.
 - **Milestone 7:** art and audio.

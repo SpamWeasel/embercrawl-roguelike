@@ -1,3 +1,4 @@
+import { readFileSync } from "node:fs";
 import tailwindcss from "@tailwindcss/vite";
 import react from "@vitejs/plugin-react";
 import type { Plugin, PluginOption } from "vite";
@@ -38,6 +39,15 @@ function productionCsp(): Plugin {
   };
 }
 
+/** Makes the game's version (from package.json) available to the UI as __APP_VERSION__. */
+function appVersion(): Plugin {
+  const { version } = JSON.parse(readFileSync("package.json", "utf8")) as { version: string };
+  return {
+    name: "embercrawl-app-version",
+    config: () => ({ define: { __APP_VERSION__: JSON.stringify(version) } }),
+  };
+}
+
 export function rendererPlugins(): PluginOption[] {
-  return [react(), tailwindcss(), productionCsp()];
+  return [react(), tailwindcss(), productionCsp(), appVersion()];
 }

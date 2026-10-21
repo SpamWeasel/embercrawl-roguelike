@@ -10,6 +10,7 @@
     "src/preload",
     "src/shared",
     "src/engine",
+    "src/bot",
     "tests",
     "scripts",
     "*.config.ts",

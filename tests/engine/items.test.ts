@@ -5,6 +5,7 @@ import { chebyshevDistance, type Point, samePoint, step } from "../../src/engine
 import {
   ARMORS,
   CACHE,
+  GOLD,
   ITEM_IDS,
   type ItemId,
   isItemId,
@@ -20,6 +21,7 @@ import { emptyPack, packAdd, packCount, packRemoveOne } from "../../src/engine/p
 import { stepDistances } from "../../src/engine/path";
 import {
   GEAR_FIRST_FLOOR,
+  goldPileCount,
   hasCache,
   PACK_SLOTS,
   recoverySupply,
@@ -156,10 +158,12 @@ describe("floor contents", () => {
           (hasCache(depth) ? 1 : 0) +
           (depth >= GEAR_FIRST_FLOOR ? 1 : 0) +
           (depth === 1 ? 1 : 0);
-        expect(floor.items).toHaveLength(expected);
+        const items = floor.items.filter((i) => i.item !== GOLD);
+        expect(items).toHaveLength(expected);
+        expect(floor.items.filter((i) => i.item === GOLD)).toHaveLength(goldPileCount(depth));
         expect(floor.items.filter((i) => i.item === CACHE)).toHaveLength(hasCache(depth) ? 1 : 0);
-        const gear = floor.items.filter(
-          (i) => i.item !== CACHE && itemKind(i.item).category !== "supply",
+        const gear = items.filter(
+          (i) => i.item !== CACHE && itemKind(i.item as ItemId).category !== "supply",
         );
         expect(gear).toHaveLength(depth >= GEAR_FIRST_FLOOR ? 1 : 0);
         for (const piece of gear) {
@@ -203,9 +207,9 @@ describe("floor contents", () => {
     for (let seed = 1; seed <= 40; seed++) {
       for (let depth = GEAR_FIRST_FLOOR; depth <= FLOOR_COUNT; depth++) {
         const gear = generateFloor(seed, depth).items.find(
-          (i) => i.item !== CACHE && !isSupply(itemKind(i.item)),
+          (i) => i.item !== CACHE && i.item !== GOLD && !isSupply(itemKind(i.item)),
         );
-        const category = gear && gear.item !== CACHE ? itemKind(gear.item).category : null;
+        const category = gear ? itemKind(gear.item as ItemId).category : null;
         if (depth % 2 === 0) {
           even++;
           if (category === "weapon") weaponsOnEven++;

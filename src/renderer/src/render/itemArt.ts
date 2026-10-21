@@ -1,6 +1,7 @@
 import {
   CACHE,
   type GearKind,
+  GOLD,
   isSupply,
   itemKind,
   type LootId,
@@ -66,7 +67,7 @@ const OUTLINE = 0x140f16;
 const WOOD = 0x7a4a26;
 const WOOD_DARK = 0x4e2e16;
 const IRON = 0x9aa0a8;
-const GOLD = 0xd8b060;
+const BRASS = 0xd8b060;
 
 type Pt = readonly [number, number];
 
@@ -180,9 +181,120 @@ function diag(t: number, o: number): Pt {
   return [5 + k * (t + o), 27 + k * (o - t)];
 }
 
+/** Fixtures of a floor that aren't items: the merchant's stall and the Beacon, unlit and lit. */
+export type Feature = "merchant" | "beacon" | "beacon-lit";
+
+const FEATURE_ART = import.meta.glob<string>("../assets/sprites/*.png", {
+  eager: true,
+  query: "?url",
+  import: "default",
+});
+
+/** The picture for a fixture: `assets/sprites/<name>.png` if it exists, else a drawn placeholder. */
+export function featureArt(feature: Feature): ArtImage {
+  return remember(`feature:${feature}`, () => {
+    const url = FEATURE_ART[`../assets/sprites/${feature}.png`];
+    if (url) return { url, placeholder: false };
+    const p = new Pixels();
+    if (feature === "merchant") drawMerchant(p);
+    else drawBeacon(p, feature === "beacon-lit");
+    p.outline();
+    return { url: p.url(), placeholder: true };
+  });
+}
+
+/** A hooded quartermaster behind a little stall with a lamp. */
+function drawMerchant(p: Pixels): void {
+  // Cloaked figure.
+  p.poly(
+    [
+      [11, 6],
+      [16, 3],
+      [21, 6],
+      [23, 20],
+      [9, 20],
+    ],
+    0x4a5a7a,
+  );
+  p.ellipse(16, 8, 3.2, 3, 0x2a2430);
+  p.px(15, 8, 0xffd88a);
+  p.px(17, 8, 0xffd88a);
+  // Stall counter with wares.
+  p.rect(4, 19, 24, 3, 0x8a5a30);
+  p.rect(4, 22, 24, 6, 0x6a4020);
+  p.rect(5, 23, 22, 1, 0x8a5a30);
+  p.ellipse(9, 17.5, 2, 1.6, 0xe0b86a);
+  p.ellipse(13, 17.5, 1.5, 1.6, 0xd8324a);
+  p.ellipse(23, 17.5, 2, 1.6, 0x8fc8ff);
+  // A hanging lamp.
+  p.line([27, 4], [27, 10], 0x9aa0a8);
+  p.ellipse(27, 12, 2, 2, 0xffc860);
+}
+
+/** A tall brazier of brass and star-metal: cold and dark, or blazing once rekindled. */
+function drawBeacon(p: Pixels, lit: boolean): void {
+  p.rect(13, 22, 6, 6, 0x6a5a4a);
+  p.rect(10, 27, 12, 2, 0x5a4a3a);
+  p.poly(
+    [
+      [8, 12],
+      [24, 12],
+      [20, 22],
+      [12, 22],
+    ],
+    0xb08a4a,
+  );
+  p.line([9, 13], [23, 13], 0xe0c080);
+  p.ellipse(16, 17, 2.5, 2.5, lit ? 0xfff4c0 : 0x3a3448);
+  if (lit) {
+    p.poly(
+      [
+        [10, 12],
+        [16, 1],
+        [22, 12],
+      ],
+      0xff9a3c,
+    );
+    p.poly(
+      [
+        [12, 12],
+        [16, 4],
+        [20, 12],
+      ],
+      0xffd45a,
+    );
+    p.ellipse(16, 10, 2, 2.5, 0xfff4c0);
+  } else {
+    for (const [x, y] of [
+      [13, 11],
+      [16, 10],
+      [19, 11],
+    ] as const)
+      p.px(x, y, 0x7a3a2a);
+  }
+}
+
+/** A heap of gold coins. */
+function drawGold(p: Pixels): void {
+  p.ellipse(16, 22, 10, 5, 0xb8862a);
+  p.ellipse(16, 20, 8, 4, 0xd8a838);
+  p.ellipse(16, 18, 5, 3, 0xf0c850);
+  for (const [x, y] of [
+    [12, 19],
+    [18, 17],
+    [21, 21],
+    [10, 22],
+    [16, 15],
+  ] as const) {
+    p.ellipse(x, y, 2, 1.2, 0xffe08a);
+    p.px(x, y, 0xfff4c0);
+  }
+}
+
 function drawItem(id: LootId): string {
   const pixels = new Pixels();
   if (id === CACHE) drawCache(pixels);
+  else if (id === GOLD) drawGold(pixels);
   else {
     const kind = itemKind(id);
     if (isSupply(kind)) drawSupply(pixels, kind);
@@ -200,7 +312,7 @@ function drawCache(p: Pixels): void {
   p.rect(5, 9, 22, 2, 0xb07a44);
   for (const x of [8, 23]) p.rect(x, 9, 2, 17, IRON);
   for (const x of [8, 23]) p.rect(x, 9, 2, 1, 0xd0d4dc);
-  p.rect(14, 13, 4, 5, GOLD);
+  p.rect(14, 13, 4, 5, BRASS);
   p.px(15, 15, 0x3a2a10);
   p.px(16, 15, 0x3a2a10);
 }
@@ -289,7 +401,7 @@ function drawSupply(p: Pixels, kind: SupplyKind): void {
     }
     case "survey": {
       p.line([9, 25], [14, 20], WOOD, 3);
-      p.ellipse(19, 13, 8, 8, GOLD);
+      p.ellipse(19, 13, 8, 8, BRASS);
       p.ellipse(19, 13, 6, 6, base);
       p.px(16, 10, 0xffffff);
       p.px(17, 10, 0xffffff);
@@ -324,7 +436,7 @@ function drawWeapon(p: Pixels, kind: GearKind): void {
         base,
       );
       p.line(diag(20, -9), diag(22, -1), light);
-      p.rect(...rounded(diag(21.5, 0)), 2, 2, GOLD);
+      p.rect(...rounded(diag(21.5, 0)), 2, 2, BRASS);
       break;
     }
     case "gearbreaker-maul": {
@@ -339,7 +451,7 @@ function drawWeapon(p: Pixels, kind: GearKind): void {
     case "prism-glaive":
     case "starsteel-halberd": {
       p.line(diag(-3, 0), diag(21, 0), WOOD, 2);
-      p.ellipse(...diag(20, 0), 1.6, 1.6, GOLD);
+      p.ellipse(...diag(20, 0), 1.6, 1.6, BRASS);
       if (kind.id === "starsteel-halberd") {
         p.poly([diag(20, -1.4), diag(31.5, 0), diag(20, 1.4)], base);
         p.poly([diag(15, 1), diag(22, 1), diag(23, 8), diag(17, 9), diag(14, 5)], base);
@@ -359,8 +471,8 @@ function drawWeapon(p: Pixels, kind: GearKind): void {
       // A sword; the sabre curves.
       const curved = kind.id === "rime-sabre";
       p.line(diag(1, 0), diag(7.5, 0), WOOD_DARK, 2.4);
-      p.ellipse(...diag(0, 0), 1.7, 1.7, GOLD);
-      p.line(diag(8.5, -5), diag(8.5, 5), mixColor(dark, GOLD, 0.5), 2);
+      p.ellipse(...diag(0, 0), 1.7, 1.7, BRASS);
+      p.line(diag(8.5, -5), diag(8.5, 5), mixColor(dark, BRASS, 0.5), 2);
       p.poly(
         curved
           ? [

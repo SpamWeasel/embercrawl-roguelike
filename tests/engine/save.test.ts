@@ -42,6 +42,7 @@ describe("character saves", () => {
       descents: 1,
       deepestFloor: 1,
       deaths: 0,
+      wins: 0,
       discovered: save.run?.discovered,
     });
   });
@@ -70,6 +71,7 @@ describe("character saves", () => {
       level: 1,
       status: "active",
       deepestFloor: 1,
+      wins: 0,
       playTimeMs: 0,
       createdAt: NOW,
       updatedAt: NOW,
@@ -198,7 +200,7 @@ describe("older save files", () => {
       v2.run.floors.map((f: { monsters: unknown }) => f.monsters),
     );
     expect(save.run?.floors[0]?.campUsed).toBe(true);
-    expect(save.record).toEqual(v2.record);
+    expect(save.record).toEqual({ ...v2.record, wins: 0 });
   });
 
   it("give version-2 characters the starting gear, an empty pack, and the floors' own items", () => {

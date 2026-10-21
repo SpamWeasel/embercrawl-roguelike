@@ -41,6 +41,7 @@ export function describeResult(result: ActionResult): LogLine[] {
 
   const lines: LogLine[] = [];
   const killed = new Set(of("monster-died").map((e) => e.id));
+  const spoils = new Map(of("monster-died").map((e) => [e.id, e.gold]));
   const attacked = new Set(of("attacked").map((e) => e.target));
   // A Survey Lens reveals traps all at once; its own line says how many.
   const surveyed = of("used").some((e) => e.item === "survey-lens");
@@ -57,7 +58,10 @@ export function describeResult(result: ActionResult): LogLine[] {
       case "attacked":
         lines.push(
           killed.has(event.target)
-            ? { text: `You slay the ${nameOf(event.kind)}.`, tone: "combat" }
+            ? {
+                text: `You slay the ${nameOf(event.kind)}${spoils.get(event.target) ? ` (+${spoils.get(event.target)} gold)` : ""}.`,
+                tone: "combat",
+              }
             : { text: `You hit the ${nameOf(event.kind)} for ${event.damage}.`, tone: "combat" },
         );
         break;
@@ -129,6 +133,54 @@ export function describeResult(result: ActionResult): LogLine[] {
         });
         break;
       }
+      case "gold-found":
+        lines.push({ text: `You gather ${event.amount} gold.`, tone: "good" });
+        break;
+      case "hoard":
+        lines.push({
+          text: `The ${nameOf(event.kind)} leaves a hoard: ${event.gold} gold and ${withArticle(lootName(event.item))}.`,
+          tone: "good",
+        });
+        break;
+      case "bought":
+        lines.push({
+          text: `You buy ${withArticle(lootName(event.item))} for ${event.price} gold.`,
+          tone: "good",
+        });
+        break;
+      case "sold":
+        lines.push({
+          text: `You sell the ${lootName(event.item)} for ${event.price} gold.`,
+          tone: "info",
+        });
+        break;
+      case "cannot-afford":
+        lines.push({
+          text: `The ${lootName(event.item)} costs ${event.price} gold; you can't afford it.`,
+          tone: "info",
+        });
+        break;
+      case "sold-out":
+        lines.push({ text: `The merchant has no more of those.`, tone: "info" });
+        break;
+      case "no-merchant":
+        lines.push({ text: "There's no one here to trade with.", tone: "info" });
+        break;
+      case "stairs-sealed":
+        lines.push({
+          text: `The way down is sealed while the ${nameOf(event.by)} lives.`,
+          tone: "danger",
+        });
+        break;
+      case "beacon-smothered":
+        lines.push({
+          text: `The ${nameOf(event.by)} smothers the Beacon. Defeat it first.`,
+          tone: "danger",
+        });
+        break;
+      case "rekindled":
+        lines.push({ text: "You rekindle the Beacon. Light floods the deep!", tone: "good" });
+        break;
       case "pack-full":
         lines.push({
           text:

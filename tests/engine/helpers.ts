@@ -7,6 +7,7 @@ import {
   type ItemId,
   type LootId,
   type PackEntry,
+  type ShopOffer,
   STARTING_ARMOR,
   STARTING_WEAPON,
   type Trap,
@@ -99,6 +100,10 @@ export interface ArenaOptions {
   /** Pack contents by slot; the rest of the pack is empty. */
   readonly pack?: readonly (PackEntry | null)[];
   readonly equipment?: Partial<Equipment>;
+  readonly gold?: number;
+  readonly merchant?: Point | null;
+  readonly stock?: readonly ShopOffer[];
+  readonly beacon?: Point | null;
   readonly turn?: number;
   readonly seed?: number;
 }
@@ -126,6 +131,7 @@ export function packOf(...entries: Array<[ItemId, number] | null>): (PackEntry |
 export function arena(rows: readonly string[], options: ArenaOptions): RunState {
   const { hero, monsters = [], camp = null, lantern = {}, turn = 0, seed = 1 } = options;
   const { items = [], traps = [], pack = emptyPack(), equipment = {} } = options;
+  const { gold = 0, merchant = null, stock = [], beacon = null } = options;
   const tiles = mapFrom(rows);
   const stairsIndex = tiles.indexOf(Tile.StairsDown);
   const floor: Floor = {
@@ -143,6 +149,9 @@ export function arena(rows: readonly string[], options: ArenaOptions): RunState 
     monsters,
     items,
     traps,
+    merchant,
+    stock,
+    beacon,
   };
   return {
     seed,
@@ -153,6 +162,7 @@ export function arena(rows: readonly string[], options: ArenaOptions): RunState 
     lantern: { charge: 100, bright: false, ...lantern },
     equipment: { weapon: STARTING_WEAPON, armor: STARTING_ARMOR, ...equipment },
     pack: emptyPack().map((_, slot) => pack[slot] ?? null),
+    gold,
     rng: Rng.fromSeed(seed).state(),
     kills: 0,
     discovered: [],

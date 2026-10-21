@@ -8,7 +8,7 @@ import { createRequire } from "node:module";
 import { resolve } from "node:path";
 
 // The title screen runs first: on an empty save folder it creates the character the game screen opens.
-const SCENES = ["title", "game", "pack"];
+const SCENES = ["title", "game", "pack", "shop"];
 
 const outDir = resolve(".smoke");
 rmSync(outDir, { recursive: true, force: true });

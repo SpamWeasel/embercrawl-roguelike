@@ -1,5 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { creatureKind } from "../../../engine/creatures";
 import { type Point, samePoint } from "../../../engine/geometry";
+import { GOLD } from "../../../engine/items";
 import { FLOOR_COUNT } from "../../../engine/map";
 import {
   type Action,
@@ -18,22 +20,32 @@ import { useGameKeys } from "../input/useGameKeys";
 import { DungeonCanvas } from "../render/dungeon/DungeonCanvas";
 import { paletteForFloor } from "../render/dungeon/palettes";
 import { InventoryPanel } from "./game/InventoryPanel";
-import { TileTooltip } from "./game/ItemDetails";
+import { ItemIcon, TileTooltip } from "./game/ItemDetails";
 import { type LogEntry, MessageLog } from "./game/MessageLog";
-import { DeathScreen, IntroCard, PauseMenu } from "./game/Overlays";
+import {
+  Minimap,
+  type MinimapSize,
+  nextMinimapSize,
+  savedMinimapSize,
+  saveMinimapSize,
+} from "./game/Minimap";
+import { DeathScreen, HelpCard, IntroCard, PauseMenu, VictoryScreen } from "./game/Overlays";
 import { GearSlots, PackBar } from "./game/PackBar";
+import { ShopPanel } from "./game/ShopPanel";
 import { StatMeters } from "./game/StatMeters";
 
 /** How many log lines stay on screen. */
 const LOG_LINES = 4;
 /** Lets the fall animation play before the death screen appears. */
 const DEATH_SCREEN_DELAY_MS = 1300;
+/** Lets the Beacon blaze for a moment before the victory screen appears. */
+const VICTORY_SCREEN_DELAY_MS = 2600;
 
 interface GameScreenProps {
   initial: CharacterSave;
   saves: SaveBridge;
-  /** Opens with the pack showing (for the smoke test). */
-  startWithPack?: boolean;
+  /** Opens with the pack or the merchant's panel showing (for the smoke test). */
+  startWith?: "pack" | "shop";
   onExit(): void;
   onReady(details: ReadyDetails): void;
 }
@@ -49,8 +61,16 @@ function interactionLabel(interaction: Interaction): string {
   switch (interaction.kind) {
     case "rest":
       return "Rest by the fire";
+    case "trade":
+      return "Trade with the merchant";
+    case "rekindle":
+      return interaction.smotheredBy
+        ? `The ${creatureKind(interaction.smotheredBy).name} smothers the Beacon`
+        : "Rekindle the Beacon";
     case "descend":
-      return `Descend to floor ${interaction.toDepth}`;
+      return interaction.sealedBy
+        ? `Sealed until the ${creatureKind(interaction.sealedBy).name} falls`
+        : `Descend to floor ${interaction.toDepth}`;
     case "ascend":
       return `Climb up to floor ${interaction.toDepth}`;
     case "pick-up":
@@ -58,12 +78,15 @@ function interactionLabel(interaction: Interaction): string {
   }
 }
 
-export function GameScreen({ initial, saves, startWithPack, onExit, onReady }: GameScreenProps) {
+export function GameScreen({ initial, saves, startWith, onExit, onReady }: GameScreenProps) {
   const session = useCharacterSession(initial, saves);
   const { character, act, walkTo, cancelWalk, flush, subscribe, beginNewDescent } = session;
   const run = character.run;
   const [menuOpen, setMenuOpen] = useState(false);
-  const [packOpen, setPackOpen] = useState(startWithPack === true);
+  const [packOpen, setPackOpen] = useState(startWith === "pack");
+  const [shopOpen, setShopOpen] = useState(startWith === "shop");
+  const [helpOpen, setHelpOpen] = useState(false);
+  const [mapSize, setMapSize] = useState<MinimapSize>(savedMinimapSize);
   const [hoverTile, setHoverTile] = useState<Point | null>(null);
   const [leaving, setLeaving] = useState(false);
   const [log, setLog] = useState<LogEntry[]>([]);
@@ -75,6 +98,7 @@ export function GameScreen({ initial, saves, startWithPack, onExit, onReady }: G
     () => initial.run?.turn === 0 && initial.run.depth === 1,
   );
   const [deathShown, setDeathShown] = useState(() => initial.run?.status === "dead");
+  const [victoryShown, setVictoryShown] = useState(() => initial.run?.status === "won");
 
   const model = useMemo(
     () =>
@@ -85,6 +109,7 @@ export function GameScreen({ initial, saves, startWithPack, onExit, onReady }: G
             hero: run.hero,
             visible: visibleTiles(run),
             sightRadius: sightRadius(run.lantern),
+            won: run.status === "won",
           }
         : null,
     [run],
@@ -111,6 +136,17 @@ export function GameScreen({ initial, saves, startWithPack, onExit, onReady }: G
     return () => clearTimeout(timer);
   }, [run?.status, deathShown]);
 
+  useEffect(() => {
+    if (run?.status !== "won" || victoryShown) return;
+    const timer = setTimeout(() => setVictoryShown(true), VICTORY_SCREEN_DELAY_MS);
+    return () => clearTimeout(timer);
+  }, [run?.status, victoryShown]);
+
+  const changeMapSize = useCallback((size: MinimapSize) => {
+    setMapSize(size);
+    saveMinimapSize(size);
+  }, []);
+
   const perform = useCallback(
     (action: Action) => {
       const result = act(action);
@@ -133,11 +169,22 @@ export function GameScreen({ initial, saves, startWithPack, onExit, onReady }: G
     const kind = run ? availableInteraction(run)?.kind : undefined;
     if (kind === "rest") perform({ type: "rest" });
     else if (kind === "pick-up") perform({ type: "pick-up" });
-    else perform({ type: "use-stairs" });
-  }, [run, perform]);
+    else if (kind === "rekindle") perform({ type: "rekindle" });
+    else if (kind === "trade") {
+      cancelWalk();
+      setShopOpen(true);
+    } else perform({ type: "use-stairs" });
+  }, [run, perform, cancelWalk]);
 
   const applySlot = useCallback((slot: number) => perform({ type: "use-item", slot }), [perform]);
   const dropSlot = useCallback((slot: number) => perform({ type: "drop-item", slot }), [perform]);
+  const buyOffer = useCallback((offer: number) => perform({ type: "buy", offer }), [perform]);
+  const sellSlot = useCallback((slot: number) => perform({ type: "sell", slot }), [perform]);
+  const closeShop = useCallback(() => setShopOpen(false), []);
+  const openHelp = useCallback(() => {
+    cancelWalk();
+    setHelpOpen(true);
+  }, [cancelWalk]);
 
   const openMenu = useCallback(() => {
     cancelWalk();
@@ -160,8 +207,10 @@ export function GameScreen({ initial, saves, startWithPack, onExit, onReady }: G
       menu: openMenu,
       inventory: openPack,
       itemSlot: applySlot,
+      map: () => changeMapSize(nextMinimapSize(mapSize)),
+      help: openHelp,
     },
-    alive && !menuOpen && !leaving && !introOpen && !packOpen,
+    alive && !menuOpen && !leaving && !introOpen && !packOpen && !shopOpen && !helpOpen,
   );
 
   const onTileClick = useCallback(
@@ -186,6 +235,8 @@ export function GameScreen({ initial, saves, startWithPack, onExit, onReady }: G
   const startOver = () => {
     beginNewDescent();
     setDeathShown(false);
+    setVictoryShown(false);
+    setShopOpen(false);
     setLog([]);
     setIntroOpen(true);
   };
@@ -211,7 +262,7 @@ export function GameScreen({ initial, saves, startWithPack, onExit, onReady }: G
         subscribe={subscribe}
         onTileClick={onTileClick}
         onHover={setHoverTile}
-        onReady={(renderer) => onReady({ renderer, scene: startWithPack ? "pack" : "game" })}
+        onReady={(renderer) => onReady({ renderer, scene: startWith ?? "game" })}
       />
       {lowHealth && <div className="low-health pointer-events-none absolute inset-0 z-[5]" />}
 
@@ -234,6 +285,9 @@ export function GameScreen({ initial, saves, startWithPack, onExit, onReady }: G
         </div>
         <StatMeters hero={run.hero} lantern={run.lantern} />
         <div className="flex shrink-0 items-center gap-4 text-sm text-bone/60">
+          <span className="flex items-center gap-1.5 font-mono text-[#ffd45a]" title="Gold">
+            <ItemIcon id={GOLD} size={18} /> {run.gold}
+          </span>
           <span>Turn {run.turn}</span>
           <button type="button" className="btn btn-small" onClick={openMenu}>
             Menu <kbd className="kbd">Esc</kbd>
@@ -270,7 +324,15 @@ export function GameScreen({ initial, saves, startWithPack, onExit, onReady }: G
         <InventoryPanel run={run} onUse={applySlot} onDrop={dropSlot} onClose={closePack} />
       )}
 
-      {hoverTile && alive && !packOpen && !menuOpen && !introOpen && (
+      {shopOpen && alive && !packOpen && (
+        <ShopPanel run={run} onBuy={buyOffer} onSell={sellSlot} onClose={closeShop} />
+      )}
+
+      {!packOpen && !shopOpen && (
+        <Minimap run={run} size={mapSize} onSize={changeMapSize} onTileClick={onTileClick} />
+      )}
+
+      {hoverTile && alive && !packOpen && !shopOpen && !menuOpen && !introOpen && (
         <TileTooltip run={run} tile={hoverTile} />
       )}
 
@@ -298,13 +360,28 @@ export function GameScreen({ initial, saves, startWithPack, onExit, onReady }: G
         />
       )}
 
+      {victoryShown && run.status === "won" && (
+        <VictoryScreen
+          run={run}
+          wins={character.record.wins}
+          onNewDescent={startOver}
+          onTitle={() => void exitToTitle()}
+        />
+      )}
+
       {menuOpen && (
         <PauseMenu
           leaving={leaving}
           onResume={() => setMenuOpen(false)}
+          onHelp={() => {
+            setMenuOpen(false);
+            setHelpOpen(true);
+          }}
           onExit={() => void exitToTitle()}
         />
       )}
+
+      {helpOpen && <HelpCard onClose={() => setHelpOpen(false)} />}
     </main>
   );
 }
