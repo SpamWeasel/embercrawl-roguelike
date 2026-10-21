@@ -1,4 +1,8 @@
-# Windows installers for x64 and ARM64 PCs. Run with `pnpm dist`.
+# Windows builds for x64 and ARM64 PCs. Run with `pnpm dist`. Three ways to get the game:
+# - a zip to unpack anywhere and run Embercrawl.exe (no installation; the main download),
+# - a single portable .exe that runs without installing (unpacks itself on each launch),
+# - an installer with Start menu and desktop shortcuts.
+# All three keep saves in %APPDATA%\Embercrawl, so moving or deleting the game never loses them.
 appId: com.embercrawl.game
 productName: Embercrawl
 copyright: Copyright © 2026 Embercrawl
@@ -10,11 +14,25 @@ files:
 asar: true
 win:
   icon: build/icon.ico
+  # The zip's name; the portable exe and installer set their own below.
+  artifactName: ${productName}-${version}-${arch}.${ext}
   target:
+    - target: zip
+      arch:
+        - x64
+        - arm64
+    - target: portable
+      arch:
+        - x64
+        - arm64
     - target: nsis
       arch:
         - x64
         - arm64
+portable:
+  artifactName: ${productName}-${version}-portable-${arch}.${ext}
+  # One file per PC type, not an extra combined one twice the size.
+  buildUniversalInstaller: false
 nsis:
   oneClick: false
   perMachine: false

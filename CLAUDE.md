@@ -64,7 +64,7 @@ The owner is new to development tooling. Explain setup steps and trade-offs plai
 | `pnpm smoke` | Builds, then launches the title screen, the game, and the game with the pack open, with throwaway saves; screenshots and reports in `.smoke/`; fails on console errors |
 | `node scripts/smoke.mjs <path\to\Embercrawl.exe>` | Same check against a packaged build |
 | `pnpm exec tsx scripts/demo-saves.mts <folder> [--showcase] <floor>...` | Demo characters already on chosen floors, one user-data folder per floor; `--showcase` gathers creatures around the hero, lays out items, a cache and a found trap, and stocks the pack |
-| `pnpm dist` | Installers in `release/<version>/` (x64 and ARM64) |
+| `pnpm dist` | Builds into `release/<version>/`, for x64 and ARM64 each: a zip to unpack and run (no install), a single portable exe, and an installer |
 | `node scripts/make-icon.mjs [source.png]` | Rebuilds `build/icon.png` and `build/icon.ico` |
 
 ## Saves
