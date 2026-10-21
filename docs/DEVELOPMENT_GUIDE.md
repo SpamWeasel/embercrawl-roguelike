@@ -759,7 +759,7 @@ the owner's art fits), and its rules as a starting point, then improves on them.
 | 3 | `e098733` | 0.3.0 | Combat, 25 creatures with five behaviors, telegraphed strikes, leveling, lantern pulse, camps, death and new descents, story card |
 | 4 | `773d2b9` | 0.4.0 | Items, the pack, weapons and armor, caches, traps, tooltips and comparisons |
 | — | `28725ae` | 0.4.0 | No-install builds: a zip and a portable exe alongside the installer |
-| 5 | (this milestone) | 0.5.0 | Gold, merchants, guardians sealing the stairs, the Beacon and victory, the balance bot and tuning, the minimap, how-to-play, the version on the title screen |
+| 5 | `86bdb60` | 0.5.0 | Gold, merchants, guardians sealing the stairs, the Beacon and victory, the balance bot and tuning, the minimap, how-to-play, the version on the title screen |
 
 Key decisions along the way (details in `docs/PLAN.md`):
 
