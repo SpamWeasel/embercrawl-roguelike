@@ -968,7 +968,7 @@ the owner's art fits), and its rules as a starting point, then improves on them.
 | 6 | `cb4e061` | 0.9.0 | Beta: character management (rename, delete to the Recycle Bin, export/import, backups and restore), settings and key remapping, run history and achievements, bug reports, tester notes |
 | 7 | `bbb3898` | 0.10.0 | Sound: 47 effects made in code, placed left or right, creature voices, background air by depth, volume settings and mute, your own sound files by name; key hints follow your bindings |
 | — | `6847e69` | 0.10.1 | The title screen loses its tagline |
-| 8 | (see git log) | 0.11.0 | Art pass: the owner's icons for all 25 creatures and most items, gold, the cache, the camp and the Beacon; the art import script |
+| 8 | `4466576` | 0.11.0 | Art pass: the owner's icons for all 25 creatures and most items, gold, the cache, the camp and the Beacon; the art import script |
 
 Key decisions along the way (details in `docs/PLAN.md`):
 
