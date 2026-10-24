@@ -13,9 +13,9 @@ interface DungeonCanvasProps {
   onHover?(tile: Point | null): void;
   /** Called once the first frame of the dungeon has been drawn. */
   onReady?(rendererName: string): void;
+  /** Calmer animation (read once, when the view starts). */
+  reducedMotion: boolean;
 }
-
-const prefersReducedMotion = () => window.matchMedia("(prefers-reduced-motion: reduce)").matches;
 
 /** Hosts a DungeonView, feeds it each new model, and forwards game events for animation. */
 export function DungeonCanvas({
@@ -25,12 +25,13 @@ export function DungeonCanvas({
   onTileClick,
   onHover,
   onReady,
+  reducedMotion,
 }: DungeonCanvasProps) {
   const hostRef = useRef<HTMLDivElement>(null);
   const viewRef = useRef<DungeonView | null>(null);
   // The view is created once; these refs let it always call the latest props.
-  const latest = useRef({ model, onTileClick, onHover, onReady });
-  latest.current = { model, onTileClick, onHover, onReady };
+  const latest = useRef({ model, onTileClick, onHover, onReady, reducedMotion });
+  latest.current = { model, onTileClick, onHover, onReady, reducedMotion };
 
   useEffect(() => {
     const host = hostRef.current;
@@ -39,7 +40,8 @@ export function DungeonCanvas({
     DungeonView.create(host, {
       onTileClick: (tile) => latest.current.onTileClick(tile),
       onHover: (tile) => latest.current.onHover?.(tile),
-      reducedMotion: prefersReducedMotion(),
+      // Read once: the view restarts (via a React key) when the setting changes.
+      reducedMotion: latest.current.reducedMotion,
     })
       .then((view) => {
         // React may unmount (or StrictMode may remount) before PixiJS finishes starting.

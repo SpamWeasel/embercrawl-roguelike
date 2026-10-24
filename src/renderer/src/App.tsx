@@ -38,6 +38,7 @@ export function App() {
   return (
     <TitleScreen
       saves={saveService}
+      startWith={launchScene === "settings" || launchScene === "records" ? launchScene : undefined}
       autoContinue={autoContinue}
       onPlay={(save) => {
         if (autoContinue && (launchScene === "pack" || launchScene === "shop"))

@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { ACHIEVEMENT_IDS, ACHIEVEMENTS, type AchievementId } from "./achievements";
 import { CREATURE_IDS, type CreatureId } from "./creatures";
 import { type Floor, generateFloor } from "./generate";
 import {
@@ -19,7 +20,7 @@ import { FLOOR_COUNT, isWalkable, MAP_HEIGHT, MAP_SIZE, MAP_WIDTH, tileAt } from
 import { emptyPack } from "./pack";
 import { Rng } from "./rng";
 import { HERO_START_HP, LANTERN_MAX, PACK_SLOTS, STACK_LIMIT } from "./rules";
-import { newRun, type RunState } from "./run";
+import { type Cause, emptyStats, newRun, type RunState } from "./run";
 
 /**
  * One character per save file. The file is self-contained, so it can be copied to another PC.
@@ -32,9 +33,12 @@ import { newRun, type RunState } from "./run";
  * 2. Creatures, combat, the lantern, camps and the bestiary (milestone 3).
  * 3. Items, the pack, weapons and armor, and traps (milestone 4).
  * 4. Gold, merchants, guardians that seal the stairs, the Beacon and victory (milestone 5).
+ * 5. Run history, achievements and per-descent tallies (milestone 6).
  */
 export const SAVE_FORMAT = "embercrawl-character";
-export const SAVE_VERSION = 4;
+export const SAVE_VERSION = 5;
+/** Finished descents kept in a character's history, newest first. */
+export const HISTORY_LIMIT = 50;
 export const CHARACTER_NAME_MAX = 24;
 
 export interface CharacterRecord {
@@ -46,6 +50,28 @@ export interface CharacterRecord {
   readonly wins: number;
   /** Every creature kind this character has ever seen (their bestiary). */
   readonly discovered: readonly CreatureId[];
+  /** Finished descents, newest first (at most HISTORY_LIMIT). */
+  readonly history: readonly HistoryEntry[];
+  /** Achievements earned, in the order they were earned. */
+  readonly achievements: readonly EarnedAchievement[];
+}
+
+/** How one descent ended. */
+export interface HistoryEntry {
+  readonly endedAt: string;
+  readonly result: "won" | "dead";
+  readonly seed: number;
+  readonly depth: number;
+  readonly level: number;
+  readonly turns: number;
+  readonly kills: number;
+  readonly gold: number;
+  readonly killedBy: Cause | null;
+}
+
+export interface EarnedAchievement {
+  readonly id: AchievementId;
+  readonly earnedAt: string;
 }
 
 export interface CharacterSave {
@@ -77,6 +103,8 @@ export interface CharacterSummary {
   readonly playTimeMs: number;
   readonly createdAt: string;
   readonly updatedAt: string;
+  /** The whole record (history, achievements, bestiary), for the records screen. */
+  readonly record: CharacterRecord;
 }
 
 export class SaveFormatError extends Error {
@@ -118,7 +146,15 @@ export function newCharacter({ id, name, now, seed }: NewCharacterOptions): Char
     updatedAt: now,
     playTimeMs: 0,
     run,
-    record: { descents: 1, deepestFloor: 1, deaths: 0, wins: 0, discovered: [...run.discovered] },
+    record: {
+      descents: 1,
+      deepestFloor: 1,
+      deaths: 0,
+      wins: 0,
+      discovered: [...run.discovered],
+      history: [],
+      achievements: [],
+    },
   };
 }
 
@@ -145,6 +181,11 @@ export function updateCharacter(
 ): CharacterSave {
   const justDied = run?.status === "dead" && save.run?.status === "active";
   const justWon = run?.status === "won" && save.run?.status === "active";
+  const discovered = mergeDiscovered(save.record.discovered, run?.discovered ?? []);
+  const history =
+    run && (justDied || justWon)
+      ? [historyEntry(run, now), ...save.record.history].slice(0, HISTORY_LIMIT)
+      : save.record.history;
   return {
     ...save,
     run,
@@ -155,9 +196,47 @@ export function updateCharacter(
       deepestFloor: Math.max(save.record.deepestFloor, run?.depth ?? 0),
       deaths: save.record.deaths + (justDied ? 1 : 0),
       wins: save.record.wins + (justWon ? 1 : 0),
-      discovered: mergeDiscovered(save.record.discovered, run?.discovered ?? []),
+      discovered,
+      history,
+      achievements: run
+        ? earnAchievements(save.record.achievements, run, discovered, now)
+        : save.record.achievements,
     },
   };
+}
+
+function historyEntry(run: RunState, now: string): HistoryEntry {
+  return {
+    endedAt: now,
+    result: run.status === "won" ? "won" : "dead",
+    seed: run.seed,
+    depth: run.depth,
+    level: run.hero.level,
+    turns: run.turn,
+    kills: run.kills,
+    gold: run.gold,
+    killedBy: run.killedBy,
+  };
+}
+
+/** The achievements already earned, plus any this descent has just earned. */
+function earnAchievements(
+  earned: readonly EarnedAchievement[],
+  run: RunState,
+  discovered: readonly CreatureId[],
+  now: string,
+): readonly EarnedAchievement[] {
+  const seen = new Set<string>(discovered);
+  const fresh = ACHIEVEMENTS.filter(
+    (a) => !earned.some((e) => e.id === a.id) && a.earned(run, seen),
+  ).map((a) => ({ id: a.id, earnedAt: now }));
+  return fresh.length === 0 ? earned : [...earned, ...fresh];
+}
+
+/** Achievements in `after` that weren't in `before`: the ones just earned, for a notice. */
+export function newAchievements(before: CharacterSave, after: CharacterSave): AchievementId[] {
+  const had = new Set(before.record.achievements.map((a) => a.id));
+  return after.record.achievements.filter((a) => !had.has(a.id)).map((a) => a.id);
 }
 
 function mergeDiscovered(
@@ -180,6 +259,7 @@ export function summarizeCharacter(save: CharacterSave): CharacterSummary {
     playTimeMs: save.playTimeMs,
     createdAt: save.createdAt,
     updatedAt: save.updatedAt,
+    record: save.record,
   };
 }
 
@@ -242,6 +322,18 @@ const UPGRADES: Readonly<
       ...save,
       run: isRecord(save.run) ? upgradeRunFrom3(save.run) : null,
       record: { ...record, wins: 0 },
+    };
+  },
+  /**
+   * 4 → 5: adds the run history, achievements and per-descent tallies. All start empty; any
+   * achievement the current descent already deserves is earned on the next turn.
+   */
+  4: (save) => {
+    const record = isRecord(save.record) ? save.record : {};
+    return {
+      ...save,
+      run: isRecord(save.run) ? { ...save.run, stats: emptyStats() } : null,
+      record: { ...record, history: [], achievements: [] },
     };
   },
 };
@@ -371,6 +463,7 @@ const ItemIdSchema = z.enum(ITEM_IDS as [ItemId, ...ItemId[]]);
 const WeaponIdSchema = z.enum(WEAPON_IDS as [WeaponId, ...WeaponId[]]);
 const ArmorIdSchema = z.enum(ARMOR_IDS as [ArmorId, ...ArmorId[]]);
 const TrapKindSchema = z.enum(TRAP_IDS as [TrapKind, ...TrapKind[]]);
+const CauseSchema = z.union([CreatureIdSchema, TrapKindSchema]);
 
 const TileSchema = z.union([z.literal(0), z.literal(1), z.literal(2), z.literal(3)]);
 
@@ -453,11 +546,20 @@ const RunSchema = z
     equipment: z.object({ weapon: WeaponIdSchema, armor: ArmorIdSchema }),
     pack: z.array(PackEntrySchema.nullable()).length(PACK_SLOTS),
     gold: Count,
+    stats: z.object({
+      goldSpent: Count,
+      rests: Count,
+      trapsFound: Count,
+      trapsSprung: Count,
+      suppliesUsed: Count,
+      brightTurns: Count,
+      guardians: z.array(CreatureIdSchema).max(FLOOR_COUNT),
+    }),
     rng: z.tuple([Uint32, Uint32, Uint32, Uint32]),
     kills: Count,
     discovered: z.array(CreatureIdSchema),
     status: z.enum(["active", "dead", "won"]),
-    killedBy: z.union([CreatureIdSchema, TrapKindSchema]).nullable(),
+    killedBy: CauseSchema.nullable(),
   })
   .refine((run) => new Set(run.floors.map((f) => f.depth)).size === run.floors.length, {
     message: "Each floor may appear only once.",
@@ -490,5 +592,26 @@ const CharacterSchema = z.object({
     deaths: Count,
     wins: Count,
     discovered: z.array(CreatureIdSchema),
+    history: z
+      .array(
+        z.object({
+          endedAt: IsoTimestamp,
+          result: z.enum(["won", "dead"]),
+          seed: z.number().int(),
+          depth: z.number().int().min(1).max(FLOOR_COUNT),
+          level: z.number().int().min(1),
+          turns: Count,
+          kills: Count,
+          gold: Count,
+          killedBy: CauseSchema.nullable(),
+        }),
+      )
+      .max(HISTORY_LIMIT),
+    achievements: z.array(
+      z.object({
+        id: z.enum(ACHIEVEMENT_IDS as [AchievementId, ...AchievementId[]]),
+        earnedAt: IsoTimestamp,
+      }),
+    ),
   }),
 }) satisfies z.ZodType<CharacterSave>;

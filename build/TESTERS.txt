@@ -1,0 +1,47 @@
+EMBERCRAWL - BETA (please read me)
+==================================
+
+Thank you for testing Embercrawl! It's a turn-based dungeon crawl: descend thirty floors of a
+buried observatory, defeat the Beacon Warden at the bottom, and rekindle the Beacon.
+
+This is a beta. Things may break, and sound isn't in the game yet.
+
+
+STARTING THE GAME
+-----------------
+- Zip download: unzip it anywhere (right-click > Extract All), open the folder, and double-click
+  Embercrawl.exe. Nothing is installed.
+- Portable .exe: double-click it. It takes a few seconds to start each time.
+- Installer: run it; it adds Embercrawl to the Start menu.
+
+Windows may say "Windows protected your PC", because the game isn't signed yet. Click
+"More info", then "Run anyway".
+
+
+HOW TO PLAY
+-----------
+Press H in the game (or "How to play" on the title screen) for the basics and every key.
+Keys can be changed in Settings. Hover the mouse over anything in the dungeon to see what it is.
+
+
+YOUR SAVES
+----------
+Characters are saved after every turn, in %APPDATA%\Embercrawl\Saves (the title screen's
+"Open saves folder" button opens it). Deleting or moving the game itself never touches them.
+The game also keeps a few backups of each character.
+
+To move a character to another PC, use Manage > "Export to a file" on the title screen, then
+"Import character" on the other PC.
+
+
+REPORTING A PROBLEM
+-------------------
+1. In the game, press Esc and choose "Copy a bug report". It copies the details the developer
+   needs (version, floor, what just happened) - paste it into your message.
+2. Say what you were doing and what went wrong.
+3. If it's about a particular character, attach its file: Manage > "Export to a file".
+
+Things the developer would love to hear about:
+- Where you died, and whether it felt fair.
+- Anything confusing, or anything you looked for and couldn't find.
+- How far you got, and how long it took.

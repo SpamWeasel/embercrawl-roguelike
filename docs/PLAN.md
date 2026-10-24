@@ -110,7 +110,25 @@ art matches; descriptions are new.
   deepest creatures' attacks (lowered), kill gold and prices.
 - **Minimap**, **how to play** (title screen, menu and H), and the **version** on the title screen.
 - Saves move to format 4, with an upgrade from format 3 tested against a genuine version-3 save.
-- Not built yet from this milestone's plan: achievements and run history.
+- Achievements and run history moved to milestone 6.
+
+**Built in milestone 6** (ready for testers; ends with the 0.9.0 beta):
+- **Character management** on the title screen (Manage): rename, delete to the Recycle Bin,
+  export to a file, import (keep both or replace when the character exists), open the saves
+  folder, and rolling backups (on opening and every 10 minutes of play, newest 5 kept) with
+  restore, also offered for a damaged save.
+- **Settings** (title screen and the in-game menu), stored in `settings.json` beside the saves:
+  interface size, motion (follow Windows or always reduced), the minimap's starting size,
+  fullscreen, and **key remapping** (up to 3 keys per action).
+- **Run history** (the last 50 descents) and **18 achievements**, shown on a Records screen;
+  each descent tallies gold spent, rests, traps, supplies, bright-lantern turns and guardians.
+- **Tester tools:** "Copy a bug report" and the version in the pause menu; `README.txt` tester
+  notes beside `Embercrawl.exe`.
+- Fixes: the hero now draws in front of the merchant's stall; the merchant panel's Buy/Sell
+  button stays in view without scrolling; dark scroll bars.
+- Saves move to format 5, with an upgrade from format 4 tested against a genuine version-4 save.
+- Moved to milestone 8: gamepad, "export all", and opening a `.embercrawl` file by
+  double-clicking it.
 
 ## 2. Diagonal movement
 
@@ -125,8 +143,8 @@ art matches; descriptions are new.
 - Controls: WASD or arrows for straight moves; Q/E/Z/C or two keys pressed together for
   diagonals; numpad 1–9; holding keys keeps walking; click a tile to walk there over explored
   ground (paths may use diagonals; any key stops the walk); Space, `.` or numpad 5 waits; Enter,
-  `>` or `<` uses stairs (or click the stairs you stand on); Esc opens the menu. Gamepad left stick
-  in 8 directions and key remapping arrive in milestone 6.
+  `>` or `<` uses stairs (or click the stairs you stand on); Esc opens the menu. Keys can be
+  remapped in Settings (milestone 6); a gamepad's left stick in 8 directions arrives in milestone 8.
 - Balance: diagonals remove corner-dancing escapes and strengthen swift creatures. The balance
   bot must use diagonals and the game is re-tuned to the 25–35% target.
 
@@ -242,16 +260,16 @@ Embercrawl.exe (Electron)
   player's real characters.
 - Uninstalling never deletes saves.
 - Built in milestone 1: one file per character, atomic writes, a save after every turn, and the
-  title screen's character list with "new character". Backups, checksums, delete, rename and
-  export/import follow in milestone 6.
+  title screen's character list with "new character". Built in milestone 6: backups and
+  restore, delete (to the Recycle Bin), rename, export/import and the saves-folder button.
 
 **Backing up and moving to another PC.**
 
 - **Export character:** saves one self-contained `.embercrawl` file anywhere (USB drive, cloud
   folder, email).
-- **Export all:** one backup file containing every character.
+- **Export all:** one backup file containing every character (milestone 8).
 - **Import:** checks the file, then asks whether to replace or keep both if that character already
-  exists. Double-clicking a `.embercrawl` file opens the game and offers to import it.
+  exists. Double-clicking a `.embercrawl` file opens the game and offers to import it (milestone 8).
 - **Open saves folder** button for manual copying.
 - The format is independent of the PC and version-numbered with upgrade steps, so older saves load
   in newer versions. A save from a newer version is refused with a clear message.
@@ -267,9 +285,10 @@ Embercrawl.exe (Electron)
 | 3 ✅ | Combat and creatures: behaviors adapted to 8-way, leveling, death, the lantern, camps, combat effects (sparks, damage numbers, dissolves, pulse shockwave) | Fight |
 | 4 ✅ | Items and inventory (healing, gear, traps), tooltips and comparisons | Gear up |
 | 5 ✅ | Full descent: 30 floors of content, guardians, shops, victory; bot re-tuned to 25–35% | Play a whole run |
-| 6 | Characters, saves and settings: character select, export/import, backups, file association, key remapping, gamepad | Manage characters and move saves between PCs |
-| 7 | Art and audio pass | |
-| 8 | Release prep: signed installers, store page (itch.io or Steam), auto-update | Share it with players |
+| 6 ✅ | Ready for testers: character management (rename, delete, export/import, backups, saves folder), settings (key remapping, interface size, motion), run history and achievements, a bug-report button, small fixes; ends with the **0.9.0 beta** | Hand the game to testers |
+| 7 | Sound effects (music afterwards, if at all: undecided) | Hear the game |
+| 8 | Art pass, gamepad, file association | |
+| 9 | Release prep: signed installers, store page (itch.io or Steam), auto-update | Share it with players |
 
 Each milestone ends with `pnpm check` and the smoke test passing, and a commit.
 
@@ -281,5 +300,7 @@ aren't installed through Steam.
 
 ## Open decisions
 
+- Music: the owner isn't sure the game needs music right away; sound effects come first
+  (decided 2026-10-24).
 - Operating systems beyond Windows (macOS, Linux/Steam Deck): deferred.
-- Distribution (itch.io or Steam): decide at milestone 8.
+- Distribution (itch.io or Steam): decide at milestone 9.

@@ -16,7 +16,7 @@ import {
 import { MAP_HEIGHT, MAP_SIZE, MAP_WIDTH, Tile, type TileKind } from "../../src/engine/map";
 import { emptyPack } from "../../src/engine/pack";
 import { Rng } from "../../src/engine/rng";
-import type { Hero, Lantern, RunState } from "../../src/engine/run";
+import { emptyStats, type Hero, type Lantern, type RunState } from "../../src/engine/run";
 
 const SYMBOLS: Readonly<Record<string, TileKind>> = {
   "#": Tile.Wall,
@@ -163,6 +163,7 @@ export function arena(rows: readonly string[], options: ArenaOptions): RunState 
     equipment: { weapon: STARTING_WEAPON, armor: STARTING_ARMOR, ...equipment },
     pack: emptyPack().map((_, slot) => pack[slot] ?? null),
     gold,
+    stats: emptyStats(),
     rng: Rng.fromSeed(seed).state(),
     kills: 0,
     discovered: [],

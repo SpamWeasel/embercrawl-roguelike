@@ -15,6 +15,12 @@ body,
   height: 100%;
 }
 
+/* Thin, dark scroll bars that suit the panels, instead of Windows' bright default. */
+* {
+  scrollbar-color: rgb(239 230 216 / 0.25) transparent;
+  scrollbar-width: thin;
+}
+
 body {
   margin: 0;
   background: radial-gradient(ellipse at 50% 90%, #24110b 0%, var(--color-abyss) 62%);
@@ -73,6 +79,21 @@ body {
   }
 }
 
+@keyframes achievement {
+  0% {
+    opacity: 0;
+    transform: translateY(-10px) scale(0.96);
+  }
+  8%,
+  80% {
+    opacity: 1;
+    transform: none;
+  }
+  100% {
+    opacity: 0;
+  }
+}
+
 @keyframes slide-in {
   from {
     opacity: 0;
@@ -124,6 +145,20 @@ body {
   }
 }
 
+/* The same, when the player picks reduced motion in Settings. */
+html.reduce-motion .low-health {
+  animation: none;
+}
+
+html.reduce-motion .floor-banner {
+  /* Unlayered, so this already beats the component style below without !important. */
+  animation-duration: 1.6s;
+}
+
+html.reduce-motion .inventory-panel {
+  animation: none;
+}
+
 @layer components {
   .panel {
     @apply rounded-lg border border-white/10 bg-ash/85 shadow-2xl shadow-black/60 backdrop-blur-sm;
@@ -135,6 +170,37 @@ body {
 
   .btn-primary {
     @apply border-ember/70 bg-ember/20 text-[#ffe2c4] hover:bg-ember/30;
+  }
+
+  /** A key binding in Settings: click to change it. */
+  .key-slot {
+    @apply min-w-16 cursor-pointer rounded border border-white/20 bg-black/40 px-2 py-0.5 font-mono text-xs text-bone hover:border-ember/60;
+  }
+
+  .key-slot--empty {
+    @apply border-dashed text-bone/45;
+  }
+
+  .key-slot--waiting {
+    @apply animate-pulse border-ember bg-ember/20 text-[#ffe2c4];
+  }
+
+  .key-remove {
+    @apply ml-0.5 cursor-pointer px-1 text-sm text-bone/40 hover:text-[#ff9c8a];
+  }
+
+  /** Achievement notices, top center, each fading out on its own. */
+  .achievement-toasts {
+    @apply pointer-events-none absolute top-20 left-1/2 z-30 flex -translate-x-1/2 flex-col items-center gap-2;
+  }
+
+  .achievement-toast {
+    @apply rounded-lg border border-ember/50 bg-[#1c1610]/95 px-5 py-2.5 text-center shadow-2xl shadow-black/70;
+    animation: achievement 4.5s ease-out both;
+  }
+
+  .btn-danger {
+    @apply border-[#ff8a7a]/60 bg-[#ff5a4a]/15 text-[#ffd3c9] hover:border-[#ff8a7a] hover:bg-[#ff5a4a]/25;
   }
 
   .btn-small {
@@ -223,6 +289,11 @@ body {
 
   .minimap-show {
     @apply pointer-events-auto absolute top-[4.25rem] right-4 z-10;
+  }
+
+  /** The selected item and the Buy/Sell button, pinned to the bottom of the merchant panel. */
+  .shop-footer {
+    @apply sticky -bottom-4 -mx-4 flex flex-col gap-2 border-t border-white/10 bg-ash px-4 pt-3 pb-4;
   }
 
   /** One line in the merchant's list: icon, name, price. */

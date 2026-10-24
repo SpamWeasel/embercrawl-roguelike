@@ -30,7 +30,7 @@ The owner is new to development tooling. Explain setup steps and trade-offs plai
 - Every animation must respect `prefers-reduced-motion` (no bob, shake, particles; shorter steps).
 - **Saves must never break:** every save-format change bumps the format version, adds an upgrade
   step and adds a test that loads the previous format. Capture a genuine fixture from the old
-  engine *before* changing it (see `tests/fixtures/character-v1.json` to `character-v3.json`);
+  engine *before* changing it (see `tests/fixtures/character-v1.json` to `character-v4.json`);
   fixtures are never reformatted (Biome ignores `tests/fixtures`).
 - **Balance changes are measured:** run `pnpm balance` on tuning seeds before and after, and
   confirm on the check seeds (from 100001); record the result in `docs/DEVELOPMENT_GUIDE.md`.
@@ -63,7 +63,7 @@ The owner is new to development tooling. Explain setup steps and trade-offs plai
 | `pnpm dev:web` | Game window only in a browser, at http://localhost:5173 (no Electron; saves in browser storage) |
 | `pnpm check` | Typecheck (engine, node, web) + Biome lint + Vitest |
 | `pnpm format` | Biome auto-format and import sorting |
-| `pnpm smoke` | Builds, then launches the title screen, the game, and the game with the pack or the merchant panel open, with throwaway saves; screenshots and reports in `.smoke/`; fails on console errors |
+| `pnpm smoke` | Builds, then launches the title screen, Settings, Records, the game, and the game with the pack or the merchant panel open, with throwaway saves; screenshots and reports in `.smoke/`; fails on console errors |
 | `node scripts/smoke.mjs <path\to\Embercrawl.exe>` | Same check against a packaged build |
 | `pnpm balance [runs] [first seed]` | The balance bot plays whole descents and reports the win rate (target 25–35%); tuning seeds 1–300, check seeds from 100001 |
 | `pnpm exec tsx scripts/demo-saves.mts <folder> [--showcase] <floor>...` | Demo characters already on chosen floors, one user-data folder per floor; `--showcase` gathers creatures around the hero, lays out items, a cache and a found trap, and stocks the pack; `--merchant` stands the hero at a merchant with gold; `--won` makes a won floor 30 |
@@ -76,7 +76,10 @@ The owner is new to development tooling. Explain setup steps and trade-offs plai
 - Development builds (`pnpm dev`, the unpacked `out/` build): `%APPDATA%\Embercrawl Dev\Saves`, so
   testing never touches real characters.
 - `EMBERCRAWL_USER_DATA=<folder>` points the app at another user-data folder (smoke tests, demos).
-- Browser preview: `localStorage` keys `embercrawl:character:<id>`.
+- Backups: `Saves\Backups\<id>\<time>.embercrawl`, newest 5 kept; deleting a character sends its
+  file and backups to the Recycle Bin.
+- Settings: `settings.json` in the user-data folder (`%APPDATA%\Embercrawl`), never inside a save.
+- Browser preview: `localStorage` keys `embercrawl:character:<id>` and `embercrawl:settings`.
 
 ## Testing notes
 
@@ -119,17 +122,21 @@ The owner is new to development tooling. Explain setup steps and trade-offs plai
 ## Layout
 
 - `src/engine` — game rules (pure, seeded): map, generation, sight, paths, `creatures` (roster),
-  `items` (supplies, weapons, armor, traps), `pack` (slot helpers), `rules` (all balance
+  `items` (supplies, weapons, armor, traps), `pack` (slot helpers), `achievements`, `rules` (all balance
   numbers), `run` (actions, combat, items, traps, gold, trading, guardians, the Beacon, creature
   turns, events), save format
 - `src/bot` — the balance bot: a fixed, simple player used by `scripts/balance.mts` (pure, like
   the engine)
-- `src/main` — Electron main process: window, save store (`save-store.ts`), smoke-test mode
+- `src/main` — Electron main process: window, save store (`save-store.ts`: saves, backups, export/import, Recycle Bin), settings file
+  (`settings-store.ts`), smoke-test mode
 - `src/preload` — exposes `window.embercrawl`
-- `src/shared` — types shared across processes (`bridge.ts`)
+- `src/shared` — types shared across processes (`bridge.ts`) and the settings format and default
+  keys (`settings.ts`)
 - `src/renderer/src` — React UI: `screens/` (`game/` holds the HUD meters, message log, pack bar,
-  pack panel, tooltips and item/creature details, and overlays), `game/` (session, autosave,
-  click-to-walk, timing, message text, item and creature wording, lore), `input/` (keyboard),
+  pack panel, tooltips and item/creature details, and overlays; `title/` holds the Manage dialog), `SettingsScreen`, `Records` (history and
+  achievements), `Dialog`, `game/` (session, autosave,
+  click-to-walk, timing, message text, item and creature wording, lore, bug report), `input/` (remappable keyboard), `settings/`
+  (settings context),
   `saves/` (desktop or browser storage), `render/` (PixiJS; `itemArt` serves item and trap
   pictures to both PixiJS and React), `assets/sprites/` (the owner's art, picked up by file name)
 - `src/renderer/src/render/dungeon` — `DungeonView` (scene, frame loop, camera, light, event

@@ -220,13 +220,16 @@ export class DungeonView {
     this.beaconGlow.anchor.set(0.5);
     this.beaconGlow.blendMode = "add";
     for (const fixture of [this.merchant, this.beacon, this.beaconGlow]) fixture.visible = false;
+    // The stall stands among the actors, larger than a tile and behind anyone at it, so it still
+    // shows around the hero while trading.
+    this.merchant.anchor.set(0.5, 1);
+    this.actors.addChild(this.merchant);
     this.actors.sortableChildren = true;
     this.actors.addChild(this.hero.container);
     this.effects = new EffectLayer((p) => this.world.toGlobal(p), this.glow.texture);
     this.world.addChild(
       this.stairs,
       this.camp,
-      this.merchant,
       this.beacon,
       this.loot.traps,
       this.ground.container,
@@ -772,7 +775,15 @@ export class DungeonView {
     };
     this.merchant.texture = this.lootTextures.feature("merchant");
     this.beacon.texture = this.lootTextures.feature(this.beaconLit ? "beacon-lit" : "beacon");
-    place(this.merchant, floor.merchant);
+    this.merchant.visible = floor.merchant !== null;
+    if (floor.merchant) {
+      this.merchant.position.set(
+        (floor.merchant.x + 0.5) * TILE_PIXELS,
+        (floor.merchant.y + 1) * TILE_PIXELS,
+      );
+      this.merchant.setSize(TILE_PIXELS * 1.5);
+      this.merchant.zIndex = this.merchant.y - TILE_PIXELS * 0.25;
+    }
     place(this.beacon, floor.beacon);
     this.beaconGlow.visible = floor.beacon !== null;
     if (floor.beacon)

@@ -5,7 +5,7 @@ import { causeName } from "../../game/itemText";
 import { INTRO_LINES, INTRO_TITLE } from "../../game/lore";
 
 /** Calls `onKey` for the given key codes while mounted. */
-function useKeys(codes: readonly string[], onKey: (code: string) => void): void {
+export function useKeys(codes: readonly string[], onKey: (code: string) => void): void {
   useEffect(() => {
     const listener = (event: KeyboardEvent) => {
       if (!codes.includes(event.code) || event.repeat) return;
@@ -18,7 +18,7 @@ function useKeys(codes: readonly string[], onKey: (code: string) => void): void 
 }
 
 /** Gives a dialog's main button keyboard focus when it appears. */
-function useFocusOnMount<T extends HTMLElement>() {
+export function useFocusOnMount<T extends HTMLElement>() {
   const ref = useRef<T>(null);
   useEffect(() => ref.current?.focus(), []);
   return ref;
@@ -122,11 +122,17 @@ export function PauseMenu({
   leaving,
   onResume,
   onHelp,
+  onSettings,
+  onRecords,
+  onReport,
   onExit,
 }: {
   leaving: boolean;
   onResume(): void;
   onHelp(): void;
+  onSettings(): void;
+  onRecords(): void;
+  onReport(): void;
   onExit(): void;
 }) {
   const focusRef = useFocusOnMount<HTMLButtonElement>();
@@ -145,6 +151,12 @@ export function PauseMenu({
         <button type="button" className="btn btn-primary" onClick={onResume} ref={focusRef}>
           Resume
         </button>
+        <button type="button" className="btn" onClick={onRecords}>
+          Records and achievements
+        </button>
+        <button type="button" className="btn" onClick={onSettings}>
+          Settings
+        </button>
         <button type="button" className="btn" onClick={onHelp}>
           How to play <kbd className="kbd">H</kbd>
         </button>
@@ -154,7 +166,12 @@ export function PauseMenu({
         <button type="button" className="btn" onClick={onExit} disabled={leaving}>
           {leaving ? "Saving…" : "Save and return to title"}
         </button>
-        <p className="text-center text-xs text-bone/45">Your descent is saved after every turn.</p>
+        <button type="button" className="btn btn-small" onClick={onReport}>
+          Copy a bug report
+        </button>
+        <p className="text-center text-xs text-bone/45">
+          Your descent is saved after every turn. Version {__APP_VERSION__}.
+        </p>
       </div>
     </div>
   );

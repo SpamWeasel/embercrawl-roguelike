@@ -88,6 +88,31 @@ export interface Lantern {
 /** What ended a descent: a creature, or a trap. */
 export type Cause = CreatureId | TrapKind;
 
+/** Tallies kept through one descent, for achievements and the run history. */
+export interface RunStats {
+  readonly goldSpent: number;
+  readonly rests: number;
+  readonly trapsFound: number;
+  readonly trapsSprung: number;
+  readonly suppliesUsed: number;
+  /** Turns spent with the lantern bright. */
+  readonly brightTurns: number;
+  /** Guardians slain, in order. */
+  readonly guardians: readonly CreatureId[];
+}
+
+export function emptyStats(): RunStats {
+  return {
+    goldSpent: 0,
+    rests: 0,
+    trapsFound: 0,
+    trapsSprung: 0,
+    suppliesUsed: 0,
+    brightTurns: 0,
+    guardians: [],
+  };
+}
+
 /** One descent: everything needed to resume exactly where the player left off. */
 export interface RunState {
   readonly seed: number;
@@ -100,6 +125,7 @@ export interface RunState {
   readonly equipment: Equipment;
   readonly pack: Pack;
   readonly gold: number;
+  readonly stats: RunStats;
   /** The gameplay random stream (combat rolls, erratic steps), separate from floor generation. */
   readonly rng: RngState;
   readonly kills: number;
@@ -321,6 +347,7 @@ export function newRun(seed: number): RunState {
     equipment: { weapon: STARTING_WEAPON, armor: STARTING_ARMOR },
     pack: emptyPack(),
     gold: 0,
+    stats: emptyStats(),
     rng: Rng.derive(seed, "play").state(),
     kills: 0,
     discovered: seen.discovered,
@@ -450,6 +477,7 @@ class Turn {
   private campUsed: boolean;
   private stock: readonly ShopOffer[];
   private gold: number;
+  private readonly stats: Mutable<RunStats>;
   private turnNumber: number;
   private kills: number;
   private status: RunState["status"];
@@ -469,6 +497,7 @@ class Turn {
     this.campUsed = this.floor.campUsed;
     this.stock = this.floor.stock;
     this.gold = run.gold;
+    this.stats = { ...run.stats, guardians: [...run.stats.guardians] };
     this.turnNumber = run.turn;
     this.kills = run.kills;
     this.status = run.status;
@@ -531,6 +560,7 @@ class Turn {
     }
     this.pack = pack;
     this.gold -= offer.price;
+    this.stats.goldSpent += offer.price;
     this.stock = this.stock.map((o, i) => (i === index ? { ...o, count: o.count - 1 } : o));
     this.events.push({ type: "bought", item: offer.item, price: offer.price, offer: index });
     return true;
@@ -613,6 +643,7 @@ class Turn {
     this.hero.hp += healed;
     this.lantern.charge += charge;
     this.campUsed = true;
+    this.stats.rests += 1;
     this.events.push({ type: "rested", healed, charge });
     return true;
   }
@@ -698,6 +729,7 @@ class Turn {
     const hero = this.hero;
     const used = (amount: number) => {
       this.pack = packRemoveOne(this.pack, slot);
+      this.stats.suppliesUsed += 1;
       this.events.push({ type: "used", item, amount });
       return true;
     };
@@ -849,6 +881,7 @@ class Turn {
     const trap = this.traps.find((t) => samePoint(t, this.hero));
     if (!trap) return;
     this.traps = this.traps.filter((t) => t !== trap);
+    this.stats.trapsSprung += 1;
     const hero = this.hero;
     let damage = 0;
     let absorbed = 0;
@@ -902,6 +935,7 @@ class Turn {
   burnLantern(): void {
     this.turnNumber += 1;
     if (!this.lantern.bright) return;
+    this.stats.brightTurns += 1;
     this.lantern.charge = Math.max(0, this.lantern.charge - BRIGHT_COST);
     if (this.lantern.charge === 0) {
       this.lantern.bright = false;
@@ -939,7 +973,10 @@ class Turn {
       gold,
     });
     this.monsters = this.monsters.filter((m) => m !== monster);
-    if (kind.guardian) this.leaveHoard(monster);
+    if (kind.guardian) {
+      this.stats.guardians = [...this.stats.guardians, monster.kind];
+      this.leaveHoard(monster);
+    }
     this.gainXp(kind.xp);
   }
 
@@ -1159,6 +1196,11 @@ class Turn {
       equipment: { ...this.equipment },
       pack: this.pack,
       gold: this.gold,
+      stats: {
+        ...this.stats,
+        trapsFound:
+          this.stats.trapsFound + this.events.filter((e) => e.type === "trap-found").length,
+      },
       floors: replaceFloor(this.run.floors, seen.floor),
       rng: this.rng.state(),
       kills: this.kills,
@@ -1200,6 +1242,7 @@ function takeStairs(run: RunState): ActionResult {
     if (charge === 0) events.push({ type: "lantern", bright: false, reason: "empty" });
   }
   const seen = look(target, hero, lantern, run.discovered, events);
+  const found = events.filter((e) => e.type === "trap-found").length;
   const floors = existing ? replaceFloor(run.floors, seen.floor) : [...run.floors, seen.floor];
   return {
     run: {
@@ -1210,6 +1253,11 @@ function takeStairs(run: RunState): ActionResult {
       lantern,
       floors,
       discovered: seen.discovered,
+      stats: {
+        ...run.stats,
+        trapsFound: run.stats.trapsFound + found,
+        brightTurns: run.stats.brightTurns + (run.lantern.bright ? 1 : 0),
+      },
     },
     events,
     tookTurn: true,

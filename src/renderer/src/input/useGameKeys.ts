@@ -1,5 +1,6 @@
 import { useEffect, useRef } from "react";
 import { type Direction, directionFromDelta } from "../../../engine/geometry";
+import type { KeyAction, Settings } from "../../../shared/settings";
 import {
   KEY_REPEAT_DELAY_MS as REPEAT_DELAY_MS,
   KEY_REPEAT_INTERVAL_MS as REPEAT_INTERVAL_MS,
@@ -23,37 +24,41 @@ export interface GameKeyHandlers {
   help(): void;
 }
 
-/**
- * Key layout. Physical key codes are used, so WASD stays in the same place on any keyboard layout.
- * Later milestones make this remappable.
- */
-const AXIS_KEYS: Readonly<Record<string, { dx: number; dy: number }>> = {
-  KeyW: { dx: 0, dy: -1 },
-  ArrowUp: { dx: 0, dy: -1 },
-  KeyS: { dx: 0, dy: 1 },
-  ArrowDown: { dx: 0, dy: 1 },
-  KeyA: { dx: -1, dy: 0 },
-  ArrowLeft: { dx: -1, dy: 0 },
-  KeyD: { dx: 1, dy: 0 },
-  ArrowRight: { dx: 1, dy: 0 },
-};
-const DIRECT_KEYS: Readonly<Record<string, Direction>> = {
-  KeyQ: "nw",
-  KeyE: "ne",
-  KeyZ: "sw",
-  KeyC: "se",
-  Numpad8: "n",
-  Numpad9: "ne",
-  Numpad6: "e",
-  Numpad3: "se",
-  Numpad2: "s",
-  Numpad1: "sw",
-  Numpad4: "w",
-  Numpad7: "nw",
-};
-const WAIT_KEYS = new Set(["Space", "Numpad5", "Period"]);
-const INTERACT_KEYS = new Set(["Enter", "NumpadEnter"]);
-const INVENTORY_KEYS = new Set(["KeyI", "Tab"]);
+/** Directions of the four movement actions that combine into diagonals when held together. */
+const AXES: ReadonlyArray<readonly [KeyAction, { dx: number; dy: number }]> = [
+  ["move-n", { dx: 0, dy: -1 }],
+  ["move-s", { dx: 0, dy: 1 }],
+  ["move-w", { dx: -1, dy: 0 }],
+  ["move-e", { dx: 1, dy: 0 }],
+];
+const DIAGONALS: ReadonlyArray<readonly [KeyAction, Direction]> = [
+  ["move-nw", "nw"],
+  ["move-ne", "ne"],
+  ["move-sw", "sw"],
+  ["move-se", "se"],
+];
+
+/** The player's bindings turned into lookups by key code. */
+function keyMaps(keys: Settings["keys"]) {
+  const codes = (action: KeyAction) => new Set(keys[action]);
+  const axis = new Map<string, { dx: number; dy: number }>();
+  for (const [action, step] of AXES) for (const code of keys[action]) axis.set(code, step);
+  const direct = new Map<string, Direction>();
+  for (const [action, direction] of DIAGONALS)
+    for (const code of keys[action]) direct.set(code, direction);
+  return {
+    axis,
+    direct,
+    wait: codes("wait"),
+    interact: codes("interact"),
+    lantern: codes("lantern"),
+    pulse: codes("pulse"),
+    pack: codes("pack"),
+    map: codes("map"),
+    help: codes("help"),
+  };
+}
+
 /** The number row uses pack slots 1–9, then 0 for the tenth. (The number pad moves.) */
 const SLOT_KEYS = [
   "Digit1",
@@ -72,15 +77,21 @@ const SLOT_KEYS = [
 const CHORD_MS = 45;
 
 /**
- * Keyboard controls for the dungeon. WASD/arrows combine (W+D walks north-east), Q/E/Z/C and the
- * number pad give diagonals directly, and held keys repeat at a steady walking pace.
+ * Keyboard controls for the dungeon, from the player's key bindings (see shared/settings.ts). The
+ * four straight moves combine (W+D walks north-east), the diagonal keys move diagonally directly,
+ * and held keys repeat at a steady walking pace. Escape and the number row are fixed.
  */
-export function useGameKeys(handlers: GameKeyHandlers, enabled: boolean): void {
+export function useGameKeys(
+  handlers: GameKeyHandlers,
+  enabled: boolean,
+  keys: Settings["keys"],
+): void {
   const latest = useRef(handlers);
   latest.current = handlers;
 
   useEffect(() => {
     if (!enabled) return;
+    const bound = keyMaps(keys);
     type Axes = Map<string, { dx: number; dy: number }>;
     /** Direction keys held right now. */
     const heldAxes: Axes = new Map();
@@ -135,8 +146,8 @@ export function useGameKeys(handlers: GameKeyHandlers, enabled: boolean): void {
     const onKeyDown = (event: KeyboardEvent) => {
       if (isTyping(event.target) || event.ctrlKey || event.altKey || event.metaKey) return;
       const { code } = event;
-      const axis = AXIS_KEYS[code];
-      const direct = DIRECT_KEYS[code];
+      const axis = bound.axis.get(code);
+      const direct = bound.direct.get(code);
       if (axis) {
         event.preventDefault();
         if (event.repeat) return;
@@ -156,28 +167,28 @@ export function useGameKeys(handlers: GameKeyHandlers, enabled: boolean): void {
         directKey = code;
         latest.current.move(direct);
         runDirect(direct, REPEAT_DELAY_MS);
-      } else if (event.key === ">" || event.key === "<" || INTERACT_KEYS.has(code)) {
+      } else if (event.key === ">" || event.key === "<" || bound.interact.has(code)) {
         event.preventDefault();
         if (!event.repeat) latest.current.interact();
-      } else if (WAIT_KEYS.has(code)) {
+      } else if (bound.wait.has(code)) {
         event.preventDefault();
         if (!event.repeat) latest.current.wait();
-      } else if (code === "KeyL") {
+      } else if (bound.lantern.has(code)) {
         event.preventDefault();
         if (!event.repeat) latest.current.toggleLight();
-      } else if (code === "KeyF") {
+      } else if (bound.pulse.has(code)) {
         event.preventDefault();
         if (!event.repeat) latest.current.pulse();
       } else if (code === "Escape") {
         event.preventDefault();
         if (!event.repeat) latest.current.menu();
-      } else if (code === "KeyM") {
+      } else if (bound.map.has(code)) {
         event.preventDefault();
         if (!event.repeat) latest.current.map();
-      } else if (code === "KeyH") {
+      } else if (bound.help.has(code)) {
         event.preventDefault();
         if (!event.repeat) latest.current.help();
-      } else if (INVENTORY_KEYS.has(code)) {
+      } else if (bound.pack.has(code)) {
         event.preventDefault();
         if (!event.repeat) latest.current.inventory();
       } else if (SLOT_KEYS.includes(code)) {
@@ -207,7 +218,7 @@ export function useGameKeys(handlers: GameKeyHandlers, enabled: boolean): void {
       window.removeEventListener("blur", releaseAll);
       releaseAll();
     };
-  }, [enabled]);
+  }, [enabled, keys]);
 }
 
 function isTyping(target: EventTarget | null): boolean {

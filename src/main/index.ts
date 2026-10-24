@@ -1,23 +1,32 @@
 import { randomInt, randomUUID } from "node:crypto";
-import { writeFile } from "node:fs/promises";
+import { mkdir, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
 import {
   app,
   BrowserWindow,
+  dialog,
   type IpcMainEvent,
   type IpcMainInvokeEvent,
   ipcMain,
   Menu,
   shell,
 } from "electron";
-import { newCharacter } from "../engine/save";
-import { type AppInfo, IPC, type ReadyDetails, type Scene } from "../shared/bridge";
-import { SaveStore } from "./save-store";
+import { type CharacterSave, newCharacter, summarizeCharacter } from "../engine/save";
+import {
+  type AppInfo,
+  type ExportResult,
+  type ImportResult,
+  IPC,
+  type ReadyDetails,
+  type Scene,
+} from "../shared/bridge";
+import { SAVE_EXTENSION, SaveStore } from "./save-store";
+import { SettingsStore } from "./settings-store";
 
 /** When set, the app renders once, saves a screenshot and report to this path, then quits. */
 const smokeScreenshotPath = process.env.EMBERCRAWL_SMOKE_SCREENSHOT;
-const SMOKE_SCENES: readonly Scene[] = ["title", "game", "pack", "shop"];
+const SMOKE_SCENES: readonly Scene[] = ["title", "settings", "records", "game", "pack", "shop"];
 const smokeScene: Scene =
   SMOKE_SCENES.find((scene) => scene === process.env.EMBERCRAWL_SMOKE_SCENE) ?? "title";
 
@@ -31,7 +40,13 @@ const rendererFile = join(__dirname, "../renderer/index.html");
 /** Only pages starting with this address may use the save bridge. */
 const trustedPagePrefix = devServerUrl ?? pathToFileURL(rendererFile).href;
 
-const saves = new SaveStore(join(app.getPath("userData"), "Saves"));
+const saves = new SaveStore(join(app.getPath("userData"), "Saves"), {
+  trash: (path) => shell.trashItem(path),
+});
+const settings = new SettingsStore(join(app.getPath("userData"), "settings.json"));
+/** Imports waiting for the player to choose "replace" or "keep both", by token. */
+const pendingImports = new Map<string, CharacterSave>();
+const FILE_FILTERS = [{ name: "Embercrawl character", extensions: [SAVE_EXTENSION.slice(1)] }];
 
 // One running copy at a time, so two windows can never write the same save files.
 if (!app.requestSingleInstanceLock()) {
@@ -81,8 +96,91 @@ function registerIpcHandlers(): void {
   });
   ipcMain.handle(IPC.loadCharacter, (event, id: unknown) => {
     assertTrustedSender(event);
-    if (typeof id !== "string") throw new TypeError("A character id must be text.");
-    return saves.load(id);
+    // Opening a character to play takes a backup of it first.
+    return saves.open(text(id, "A character id"));
+  });
+  ipcMain.handle(IPC.renameCharacter, async (event, id: unknown, name: unknown) => {
+    assertTrustedSender(event);
+    await saves.rename(text(id, "A character id"), text(name, "A character name"));
+  });
+  ipcMain.handle(IPC.deleteCharacter, (event, id: unknown) => {
+    assertTrustedSender(event);
+    return saves.remove(text(id, "A character id"));
+  });
+  ipcMain.handle(IPC.exportCharacter, async (event, id: unknown): Promise<ExportResult> => {
+    assertTrustedSender(event);
+    const save = await saves.load(text(id, "A character id"));
+    const window = BrowserWindow.fromWebContents(event.sender);
+    const options = {
+      title: "Export character",
+      defaultPath: join(app.getPath("documents"), `${fileSafe(save.name)}${SAVE_EXTENSION}`),
+      filters: FILE_FILTERS,
+    };
+    const choice = window
+      ? await dialog.showSaveDialog(window, options)
+      : await dialog.showSaveDialog(options);
+    if (choice.canceled || !choice.filePath) return { status: "cancelled" };
+    await saves.exportTo(save.id, choice.filePath);
+    return { status: "saved", path: choice.filePath };
+  });
+  ipcMain.handle(IPC.importCharacter, async (event): Promise<ImportResult> => {
+    assertTrustedSender(event);
+    const window = BrowserWindow.fromWebContents(event.sender);
+    const options = {
+      title: "Import character",
+      filters: FILE_FILTERS,
+      properties: ["openFile" as const],
+    };
+    const choice = window
+      ? await dialog.showOpenDialog(window, options)
+      : await dialog.showOpenDialog(options);
+    const path = choice.filePaths[0];
+    if (choice.canceled || !path) return { status: "cancelled" };
+    const { save, existing } = await saves.readImport(path);
+    if (!existing) {
+      await saves.accept(save, "replace", save.id);
+      return { status: "imported", summary: summarizeCharacter(save) };
+    }
+    const token = randomUUID();
+    pendingImports.set(token, save);
+    return {
+      status: "conflict",
+      token,
+      incoming: summarizeCharacter(save),
+      existing: summarizeCharacter(existing),
+    };
+  });
+  ipcMain.handle(IPC.resolveImport, async (event, token: unknown, choice: unknown) => {
+    assertTrustedSender(event);
+    const save = pendingImports.get(text(token, "An import token"));
+    pendingImports.delete(String(token));
+    if (!save || choice === "cancel") return;
+    if (choice !== "replace" && choice !== "copy") throw new TypeError("Unknown import choice.");
+    await saves.accept(save, choice, randomUUID());
+  });
+  ipcMain.handle(IPC.listBackups, (event, id: unknown) => {
+    assertTrustedSender(event);
+    return saves.backups(text(id, "A character id"));
+  });
+  ipcMain.handle(IPC.restoreBackup, async (event, id: unknown, name: unknown) => {
+    assertTrustedSender(event);
+    await saves.restore(text(id, "A character id"), text(name, "A backup name"));
+  });
+  ipcMain.handle(IPC.openSavesFolder, async (event) => {
+    assertTrustedSender(event);
+    await mkdir(saves.directory, { recursive: true });
+    const problem = await shell.openPath(saves.directory);
+    if (problem) throw new Error(problem);
+  });
+  ipcMain.handle(IPC.loadSettings, (event) => {
+    assertTrustedSender(event);
+    return settings.load();
+  });
+  ipcMain.handle(IPC.saveSettings, async (event, data: unknown) => {
+    assertTrustedSender(event);
+    const saved = await settings.save(data);
+    event.sender.setZoomFactor(saved.uiScale);
+    return saved;
   });
   ipcMain.handle(IPC.createCharacter, async (event, name: unknown) => {
     assertTrustedSender(event);
@@ -113,6 +211,18 @@ function toggleFullscreen(window: BrowserWindow): boolean {
   return next;
 }
 
+/** Checks that a bridge argument is text (anything else is a bug or tampering). */
+function text(value: unknown, what: string): string {
+  if (typeof value !== "string") throw new TypeError(`${what} must be text.`);
+  return value;
+}
+
+/** A character name made safe to use as a file name. */
+function fileSafe(name: string): string {
+  // Names never hold control characters (see normalizeCharacterName), only these symbols.
+  return name.replace(/[<>:"/\\|?*]/g, "").trim() || "Character";
+}
+
 /** Rejects bridge calls from anything other than the game's own page. */
 function assertTrustedSender(event: IpcMainInvokeEvent | IpcMainEvent): void {
   const url = event.senderFrame?.url ?? "";
@@ -138,6 +248,10 @@ function createMainWindow(): BrowserWindow {
     },
   });
   window.once("ready-to-show", () => window.show());
+  // The interface size setting is Electron's page zoom, so the dungeon stays pixel-crisp.
+  window.webContents.on("did-finish-load", () => {
+    void settings.load().then((stored) => window.webContents.setZoomFactor(stored.uiScale));
+  });
 
   // The game never opens other pages; links go to the player's default browser instead.
   window.webContents.setWindowOpenHandler(({ url }) => {

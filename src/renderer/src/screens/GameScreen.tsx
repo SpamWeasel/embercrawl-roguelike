@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { type AchievementId, achievement } from "../../../engine/achievements";
 import { creatureKind } from "../../../engine/creatures";
 import { type Point, samePoint } from "../../../engine/geometry";
 import { GOLD } from "../../../engine/items";
@@ -11,28 +12,27 @@ import {
   sightRadius,
   visibleTiles,
 } from "../../../engine/run";
-import type { CharacterSave } from "../../../engine/save";
+import { type CharacterSave, summarizeCharacter } from "../../../engine/save";
 import type { ReadyDetails, SaveBridge } from "../../../shared/bridge";
+import { bugReport } from "../game/bugReport";
 import { lootName } from "../game/itemText";
 import { describeResult } from "../game/messages";
 import { useCharacterSession } from "../game/useCharacterSession";
 import { useGameKeys } from "../input/useGameKeys";
 import { DungeonCanvas } from "../render/dungeon/DungeonCanvas";
 import { paletteForFloor } from "../render/dungeon/palettes";
+import { useSettings, wantsReducedMotion } from "../settings/SettingsContext";
+import { Dialog } from "./Dialog";
 import { InventoryPanel } from "./game/InventoryPanel";
 import { ItemIcon, TileTooltip } from "./game/ItemDetails";
 import { type LogEntry, MessageLog } from "./game/MessageLog";
-import {
-  Minimap,
-  type MinimapSize,
-  nextMinimapSize,
-  savedMinimapSize,
-  saveMinimapSize,
-} from "./game/Minimap";
+import { Minimap, type MinimapSize, nextMinimapSize } from "./game/Minimap";
 import { DeathScreen, HelpCard, IntroCard, PauseMenu, VictoryScreen } from "./game/Overlays";
 import { GearSlots, PackBar } from "./game/PackBar";
 import { ShopPanel } from "./game/ShopPanel";
 import { StatMeters } from "./game/StatMeters";
+import { Records } from "./Records";
+import { SettingsScreen } from "./SettingsScreen";
 
 /** How many log lines stay on screen. */
 const LOG_LINES = 4;
@@ -86,7 +86,13 @@ export function GameScreen({ initial, saves, startWith, onExit, onReady }: GameS
   const [packOpen, setPackOpen] = useState(startWith === "pack");
   const [shopOpen, setShopOpen] = useState(startWith === "shop");
   const [helpOpen, setHelpOpen] = useState(false);
-  const [mapSize, setMapSize] = useState<MinimapSize>(savedMinimapSize);
+  const { settings, update: updateSettings } = useSettings();
+  const mapSize = settings.minimap;
+  const [settingsOpen, setSettingsOpen] = useState(false);
+  const [recordsOpen, setRecordsOpen] = useState(false);
+  const [report, setReport] = useState<{ text: string; copied: boolean } | null>(null);
+  const [toasts, setToasts] = useState<Array<{ key: number; id: AchievementId }>>([]);
+  const knownAchievements = useRef(new Set(initial.record.achievements.map((a) => a.id)));
   const [hoverTile, setHoverTile] = useState<Point | null>(null);
   const [leaving, setLeaving] = useState(false);
   const [log, setLog] = useState<LogEntry[]>([]);
@@ -142,10 +148,45 @@ export function GameScreen({ initial, saves, startWith, onExit, onReady }: GameS
     return () => clearTimeout(timer);
   }, [run?.status, victoryShown]);
 
-  const changeMapSize = useCallback((size: MinimapSize) => {
-    setMapSize(size);
-    saveMinimapSize(size);
-  }, []);
+  const changeMapSize = useCallback(
+    (size: MinimapSize) => updateSettings({ ...settings, minimap: size }),
+    [settings, updateSettings],
+  );
+
+  // A notice (and a log line) for each achievement as it's earned.
+  useEffect(() => {
+    const fresh = character.record.achievements.filter((a) => !knownAchievements.current.has(a.id));
+    if (fresh.length === 0) return;
+    for (const a of fresh) knownAchievements.current.add(a.id);
+    setToasts((previous) => [
+      ...previous,
+      ...fresh.map((a) => ({ key: logCount.current++, id: a.id })),
+    ]);
+    setLog((previous) =>
+      [
+        ...previous,
+        ...fresh.map((a) => ({
+          text: `Achievement: ${achievement(a.id).name}!`,
+          tone: "good" as const,
+          id: logCount.current++,
+        })),
+      ].slice(-LOG_LINES),
+    );
+  }, [character.record.achievements]);
+
+  const copyReport = useCallback(() => {
+    const text = bugReport(
+      character,
+      log,
+      window.embercrawl ? "Windows desktop" : "browser preview",
+    );
+    setMenuOpen(false);
+    setReport({ text, copied: false });
+    navigator.clipboard.writeText(text).then(
+      () => setReport({ text, copied: true }),
+      () => setReport({ text, copied: false }),
+    );
+  }, [character, log]);
 
   const perform = useCallback(
     (action: Action) => {
@@ -210,7 +251,17 @@ export function GameScreen({ initial, saves, startWith, onExit, onReady }: GameS
       map: () => changeMapSize(nextMinimapSize(mapSize)),
       help: openHelp,
     },
-    alive && !menuOpen && !leaving && !introOpen && !packOpen && !shopOpen && !helpOpen,
+    alive &&
+      !menuOpen &&
+      !leaving &&
+      !introOpen &&
+      !packOpen &&
+      !shopOpen &&
+      !helpOpen &&
+      !settingsOpen &&
+      !recordsOpen &&
+      !report,
+    settings.keys,
   );
 
   const onTileClick = useCallback(
@@ -257,6 +308,9 @@ export function GameScreen({ initial, saves, startWith, onExit, onReady }: GameS
   return (
     <main className="relative h-dvh w-full select-none overflow-hidden bg-abyss">
       <DungeonCanvas
+        // Restarts the view when motion or the interface size changes (it reads them once).
+        key={`${settings.motion}-${settings.uiScale}`}
+        reducedMotion={wantsReducedMotion(settings)}
         className="absolute inset-0"
         model={model}
         subscribe={subscribe}
@@ -377,11 +431,55 @@ export function GameScreen({ initial, saves, startWith, onExit, onReady }: GameS
             setMenuOpen(false);
             setHelpOpen(true);
           }}
+          onSettings={() => {
+            setMenuOpen(false);
+            setSettingsOpen(true);
+          }}
+          onRecords={() => {
+            setMenuOpen(false);
+            setRecordsOpen(true);
+          }}
+          onReport={copyReport}
           onExit={() => void exitToTitle()}
         />
       )}
 
       {helpOpen && <HelpCard onClose={() => setHelpOpen(false)} />}
+      {settingsOpen && <SettingsScreen onClose={() => setSettingsOpen(false)} />}
+      {recordsOpen && (
+        <Dialog title={`${character.name}: records`} wide onClose={() => setRecordsOpen(false)}>
+          <Records summary={summarizeCharacter(character)} />
+        </Dialog>
+      )}
+      {report && (
+        <Dialog title="Bug report" onClose={() => setReport(null)}>
+          <p className="text-sm text-bone/80">
+            {report.copied
+              ? "Copied! Paste it into an email or message to the developer, and add what happened."
+              : "Select the text below and copy it (Ctrl+C), then paste it into an email or message."}
+          </p>
+          <textarea
+            readOnly
+            className="field h-64 font-mono text-xs"
+            value={report.text}
+            onFocus={(event) => event.currentTarget.select()}
+          />
+        </Dialog>
+      )}
+
+      <div className="achievement-toasts" aria-live="polite">
+        {toasts.map((toast) => (
+          <div
+            key={toast.key}
+            className="achievement-toast"
+            onAnimationEnd={() => setToasts((all) => all.filter((t) => t.key !== toast.key))}
+          >
+            <p className="text-[11px] tracking-[0.25em] text-ember/80 uppercase">Achievement</p>
+            <p className="font-display text-lg text-[#ffe2a8]">{achievement(toast.id).name}</p>
+            <p className="text-xs text-bone/70">{achievement(toast.id).description}</p>
+          </div>
+        ))}
+      </div>
     </main>
   );
 }

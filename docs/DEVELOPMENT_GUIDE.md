@@ -1,7 +1,7 @@
 # Embercrawl development guide
 
 How every mechanism in Embercrawl works, where it lives in the code, and how to change it safely.
-Written for version 0.5.0 (milestone 5). `docs/PLAN.md` says *what* we're building and why; this
+Written for version 0.9.0 (milestone 6, the beta). `docs/PLAN.md` says *what* we're building and why; this
 guide says *how it works now*. Update both when a mechanic changes.
 
 ## Contents
@@ -508,6 +508,44 @@ traps per floor = 0 on floor 1, otherwise min(5, 1 + floor(floor number ÷ 7))  
 - Multiple characters, each in its own save file, are listed on the title screen. The first one
   ("Wanderer") is created automatically.
 
+### Run history and achievements
+
+Files: `src/engine/achievements.ts` (the list), `src/engine/save.ts` (`updateCharacter`),
+`src/renderer/src/screens/Records.tsx` (the Records screen).
+
+- Each descent keeps **tallies** in `run.stats`: gold spent, rests, traps found and sprung,
+  supplies used, turns with the lantern bright, and guardians defeated.
+- When a descent ends (death or victory), the record gains a **history entry**: date, result,
+  seed, floor, level, turns, kills, gold and what killed the hero. The newest 50 are kept
+  (`HISTORY_LIMIT`).
+- **Achievements** are checked after every turn. Each one is a test of the run and the bestiary;
+  once earned it stays earned, with the date. A notice appears at the top of the screen and in the
+  message log. There are 18:
+
+| Achievement | Earned by |
+|---|---|
+| First Blood | Slay a creature |
+| Hundred Fallen | Slay 100 creatures in one descent |
+| Into the Deep / Far Below / The Bottom | Reach floor 10 / 20 / 30 |
+| Bell Unrung / Clockwork Stilled | Defeat the Chain Sexton (floor 10) / the Orrery Knight (floor 20) |
+| Keeper of the Beacon | Rekindle the Beacon |
+| No Rest for the Bold | Rekindle the Beacon without resting at a camp |
+| By Dim Light | Reach floor 10 without turning the lantern bright |
+| Seasoned / Veteran | Reach level 10 / 20 |
+| Keen Eyes | Find 10 hidden traps in one descent |
+| Good Customer | Spend 500 gold at merchants in one descent |
+| Full Purse | Carry 1,000 gold |
+| Well Provisioned | Fill every pack slot |
+| Star-Forged | Wield the Beacon Blade or wear the Beacon Aegis |
+| Naturalist | See every kind of creature |
+
+To add one: add an entry to `ACHIEVEMENTS` with a test in `tests/engine/records.test.ts`. Its id
+is stored in saves, so never rename or reuse an id. If it needs a new tally, add the field to
+`RunStats` (a save-format change: see below).
+
+The **Records** screen (title screen: Manage > Records; in the game: Esc > Records) shows the
+totals, every achievement (earned ones lit, with the date) and the history table.
+
 ---
 
 ## 12. Saves
@@ -523,7 +561,7 @@ File: `src/engine/save.ts` (format), `src/main/save-store.ts` (writing files).
 - A save stores the run's state, including every visited floor, but **not** catalog data: an
   item is stored by id, so changing a salve's healing changes it in existing saves too.
 
-**Format versions** (`SAVE_VERSION`, now 4):
+**Format versions** (`SAVE_VERSION`, now 5):
 
 | Version | Milestone | Added | Upgrade from the previous version |
 |---|---|---|---|
@@ -531,6 +569,41 @@ File: `src/engine/save.ts` (format), `src/main/save-store.ts` (writing files).
 | 2 | 3 | Combat, creatures, lantern, camps, bestiary | Full health, level 1, full lantern; visited floors stay empty of creatures |
 | 3 | 4 | Items, pack, gear, traps | Starting gear and empty pack; visited floors get the items and traps they were generated with |
 | 4 | 5 | Gold, merchants, sealed stairs, the Beacon, victory, wins | Empty purse, no wins yet; visited floors get their gold piles (never on a tile already holding something), merchant, stock and Beacon |
+| 5 | 6 | Per-descent tallies, run history, achievements | Fresh tallies, empty history, no achievements yet |
+
+### Managing characters (desktop app)
+
+Files: `src/main/save-store.ts` (files), `src/main/index.ts` (dialogs, checks),
+`src/renderer/src/screens/title/CharacterDialog.tsx` (the Manage window).
+
+- **Rename** and **Delete** from Manage on the title screen. Deleting moves the save file and its
+  backups to the **Recycle Bin**, so a mistake can be undone from there.
+- **Backups:** a copy of the save is taken each time a character is opened and every 10 minutes
+  of play (`BACKUP_INTERVAL_MS`), in `Saves\Backups\<id>\`. The newest 5 are kept
+  (`BACKUP_LIMIT`). Manage > Backups restores one (the current file is backed up first). A
+  damaged save shows **Restore** when it has backups.
+- **Export** writes the character to a `.embercrawl` file anywhere; **Import** reads one (checked
+  and upgraded like any save). Importing a character that already exists asks: keep both (the
+  copy gets a new id and " (copy)"), replace, or cancel.
+- **Open saves folder** opens `%APPDATA%\Embercrawl\Saves` in Explorer.
+- The browser preview can export and import (download and file picker) but has no backups,
+  Recycle Bin or folder; `saves.features` tells the UI what is available.
+
+### Settings
+
+Files: `src/shared/settings.ts` (what a setting can be, default keys), `src/main/settings-store.ts`
+(the file), `src/renderer/src/settings/SettingsContext.tsx` (in the UI),
+`src/renderer/src/screens/SettingsScreen.tsx` (the screen).
+
+- Stored in `settings.json` in the user-data folder (`%APPDATA%\Embercrawl`), separate from
+  saves; the browser preview uses the `localStorage` key `embercrawl:settings`.
+- **Interface size** (90%, 100%, 115%, 130%): the window's zoom, set by the main process.
+- **Motion:** follow Windows, or always reduced (no bob, shake or particles).
+- **Map:** the minimap's starting size (small, large, hidden).
+- **Fullscreen** toggle, and **Controls**: up to 3 keys per action. Esc, F11, the Windows key
+  and 1–0 (pack slots) are fixed. A key given to one action is taken from any other.
+- A damaged or partly invalid file falls back to the default for each bad setting, never an
+  error.
 
 **Changing the save format** (required whenever `RunState`, `Floor` or the record changes shape):
 
@@ -620,7 +693,13 @@ too; gold piles are `items/gold.png`.
 | Menu | Esc |
 | Fullscreen | F11 or Alt+Enter |
 
-Key handling: `input/useGameKeys.ts` (dungeon), `screens/game/InventoryPanel.tsx` (pack) and
+Every key above except Esc, F11, Alt+Enter and 1–0 can be changed in Settings > Controls; the
+table shows the defaults.
+
+The pause menu (Esc) also has Settings, Records, **Copy a bug report** (copies the version, seed,
+floor, hero, gear and recent messages for pasting into a message) and the game's version.
+
+Key handling: `input/useGameKeys.ts` (dungeon, reading the bindings from Settings), `screens/game/InventoryPanel.tsx` (pack) and
 `screens/game/ShopPanel.tsx` (merchant).
 
 ---
@@ -690,7 +769,7 @@ level gains; gear power; `CREATURE_ATTACK_BASE` (coarse: see section 7).
 | Command | What it does |
 |---|---|
 | `pnpm check` | Type checks, lint and all tests |
-| `pnpm smoke` | Builds and launches the real app four times (title, game, game with the pack open, game with the merchant's panel open); fails on any error; screenshots in `.smoke/` |
+| `pnpm smoke` | Builds and launches the real app six times (title, settings, records, game, game with the pack open, game with the merchant's panel open); fails on any error; screenshots in `.smoke/` |
 | `pnpm balance 200 1` | The balance bot plays 200 whole descents (seeds 1–200) and reports the win rate, where runs end and what kills them |
 | `pnpm dev:web` | Runs the game in a browser at http://localhost:5173 (saves in the browser) |
 | `pnpm dev` | Runs the desktop app with hot reload |
@@ -711,8 +790,10 @@ Test files (`tests/`):
 | `engine/descent.test.ts` | Gold, merchants, guardians sealing the stairs, the Beacon, victory, the version-3 upgrade |
 | `engine/bot.test.ts` | The balance bot finishes whole descents without getting stuck |
 | `engine/save.test.ts` | Save format, upgrades from real version-1 and version-2 saves |
+| `engine/records.test.ts` | Achievements, tallies, run history, the version-4 upgrade |
 | `engine/fuzz.test.ts` | Thousands of random actions, checking the rules never break |
-| `main/save-store.test.ts` | Writing save files safely |
+| `main/save-store.test.ts` | Writing save files safely, rename, delete, backups and restore, export and import |
+| `main/settings.test.ts` | Reading and writing settings, key bindings |
 | `renderer/palettes.test.ts`, `motion.test.ts` | Palettes and animation helpers |
 
 ### The balance bot (`src/bot/bot.ts`, `scripts/balance.mts`)
@@ -760,6 +841,7 @@ the owner's art fits), and its rules as a starting point, then improves on them.
 | 4 | `773d2b9` | 0.4.0 | Items, the pack, weapons and armor, caches, traps, tooltips and comparisons |
 | — | `28725ae` | 0.4.0 | No-install builds: a zip and a portable exe alongside the installer |
 | 5 | `86bdb60` | 0.5.0 | Gold, merchants, guardians sealing the stairs, the Beacon and victory, the balance bot and tuning, the minimap, how-to-play, the version on the title screen |
+| 6 | (see git log) | 0.9.0 | Beta: character management (rename, delete to the Recycle Bin, export/import, backups and restore), settings and key remapping, run history and achievements, bug reports, tester notes |
 
 Key decisions along the way (details in `docs/PLAN.md`):
 
@@ -780,8 +862,6 @@ Key decisions along the way (details in `docs/PLAN.md`):
 
 From the plan's later milestones:
 
-- **Achievements and run history** (planned with the full descent; not built yet).
-- **Milestone 6:** character management (export/import, backups, rename, delete), settings, key
-  remapping and gamepads.
-- **Milestone 7:** art and audio.
-- **Milestone 8:** release (signed installers, store page, updates).
+- **Milestone 7:** sound effects. Music afterwards, if at all (undecided).
+- **Milestone 8:** art pass, gamepad support, opening a `.embercrawl` file by double-clicking it.
+- **Milestone 9:** release (signed builds, store page, updates).

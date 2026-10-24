@@ -10,6 +10,7 @@
 // and the floor mapped. With --won (floor 30), the Warden has fallen and the Beacon is rekindled.
 // Then launch with EMBERCRAWL_USER_DATA=<output folder>\floor-<n> (see CLAUDE.md).
 import { randomUUID } from "node:crypto";
+import { rm } from "node:fs/promises";
 import { join, resolve } from "node:path";
 import { chebyshevDistance } from "../src/engine/geometry";
 import { ARMORS, CACHE, type ItemId, type Pack, WEAPONS } from "../src/engine/items";
@@ -173,6 +174,8 @@ for (const depth of floors) {
   if (wonWanted) run = rekindled(run);
   const save = updateCharacter(fresh, run, { now, playTimeMs: 0 });
   const folder = resolve(outDir, `floor-${depth}`);
-  await new SaveStore(join(folder, "Saves")).write(save);
+  await new SaveStore(join(folder, "Saves"), {
+    trash: (path) => rm(path, { recursive: true }),
+  }).write(save);
   console.log(`Floor ${depth}: ${folder}`);
 }

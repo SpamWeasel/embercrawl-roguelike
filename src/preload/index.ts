@@ -10,6 +10,19 @@ const bridge: EmbercrawlBridge = {
     load: (id) => ipcRenderer.invoke(IPC.loadCharacter, id),
     create: (name) => ipcRenderer.invoke(IPC.createCharacter, name),
     write: (save) => ipcRenderer.invoke(IPC.writeCharacter, save),
+    rename: (id, name) => ipcRenderer.invoke(IPC.renameCharacter, id, name),
+    remove: (id) => ipcRenderer.invoke(IPC.deleteCharacter, id),
+    exportCharacter: (id) => ipcRenderer.invoke(IPC.exportCharacter, id),
+    importCharacter: () => ipcRenderer.invoke(IPC.importCharacter),
+    resolveImport: (token, choice) => ipcRenderer.invoke(IPC.resolveImport, token, choice),
+    backups: (id) => ipcRenderer.invoke(IPC.listBackups, id),
+    restore: (id, backup) => ipcRenderer.invoke(IPC.restoreBackup, id, backup),
+    openFolder: () => ipcRenderer.invoke(IPC.openSavesFolder),
+    features: { recycleBin: true, backups: true, folder: true },
+  },
+  settings: {
+    load: () => ipcRenderer.invoke(IPC.loadSettings),
+    save: (settings) => ipcRenderer.invoke(IPC.saveSettings, settings),
   },
 };
 

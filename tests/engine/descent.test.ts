@@ -272,7 +272,7 @@ describe("version-3 saves", () => {
     expect(save.run?.floors.map((f) => f.monsters)).toEqual(
       v3.run.floors.map((f: { monsters: unknown }) => f.monsters),
     );
-    expect(save.record).toEqual({ ...v3.record, wins: 0 });
+    expect(save.record).toEqual({ ...v3.record, wins: 0, history: [], achievements: [] });
   });
 
   it("give visited floors the gold they were made with, never on top of something", () => {

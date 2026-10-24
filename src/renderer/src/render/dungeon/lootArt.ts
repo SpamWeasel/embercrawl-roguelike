@@ -8,10 +8,9 @@ import {
   type TrapKind,
 } from "../../../../engine/items";
 import { type ArtImage, type Feature, featureArt, itemArt, trapArt } from "../itemArt";
+import { loadImageTexture } from "./textures";
 
 const FEATURES: readonly Feature[] = ["merchant", "beacon", "beacon-lit"];
-
-import { loadImageTexture } from "./textures";
 
 export interface LootTextures {
   item(id: LootId): Texture;

@@ -155,28 +155,32 @@ export function ShopPanel({
       </div>
 
       {row && (
-        <section aria-live="polite" className="rounded-md bg-black/25 p-3">
-          <ItemDetails id={row.item} run={run} />
-        </section>
-      )}
-      {row && (
-        <button
-          type="button"
-          className="btn btn-primary"
-          disabled={row.side === "buy" && !buyable(row)}
-          onClick={() => act(row)}
-        >
-          {row.side === "buy"
-            ? row.count === 0
-              ? "Sold out"
-              : row.price > run.gold
-                ? `Costs ${row.price} gold`
-                : !packHasRoom(run.pack, row.item)
-                  ? "No room in your pack"
-                  : `Buy for ${row.price} gold`
-            : `Sell for ${row.price} gold`}
-          <kbd className="kbd">Enter</kbd>
-        </button>
+        // Pinned to the bottom of the panel, so the button is always in reach without scrolling.
+        <div className="shop-footer">
+          <section
+            aria-live="polite"
+            className="max-h-44 overflow-y-auto rounded-md bg-black/25 p-3"
+          >
+            <ItemDetails id={row.item} run={run} />
+          </section>
+          <button
+            type="button"
+            className="btn btn-primary"
+            disabled={row.side === "buy" && !buyable(row)}
+            onClick={() => act(row)}
+          >
+            {row.side === "buy"
+              ? row.count === 0
+                ? "Sold out"
+                : row.price > run.gold
+                  ? `Costs ${row.price} gold`
+                  : !packHasRoom(run.pack, row.item)
+                    ? "No room in your pack"
+                    : `Buy for ${row.price} gold`
+              : `Sell for ${row.price} gold`}
+            <kbd className="kbd">Enter</kbd>
+          </button>
+        </div>
       )}
       <p className="text-center text-[11px] text-bone/45">
         Up/down select · Enter buys or sells · each trade takes a turn
