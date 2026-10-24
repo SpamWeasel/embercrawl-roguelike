@@ -200,7 +200,6 @@ export function TitleScreen({ saves, autoContinue, startWith, onPlay, onReady }:
 
       <div className="relative z-10 mx-auto flex h-full max-w-xl flex-col justify-center gap-8 px-6">
         <header className="text-center">
-          <p className="text-xs tracking-[0.5em] text-ember/80 uppercase">A descent awaits</p>
           <h1 className="title-ember font-display text-7xl font-bold tracking-[0.08em]">
             Embercrawl
           </h1>
