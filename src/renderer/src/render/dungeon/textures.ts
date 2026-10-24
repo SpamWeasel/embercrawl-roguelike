@@ -122,6 +122,26 @@ export async function loadImageTexture(url: string): Promise<Texture> {
   return texture;
 }
 
+/**
+ * A dimmed copy of a picture: greyed and darkened, for a fixture that is spent or not yet lit (a
+ * used camp, the Beacon before it is rekindled) when the owner's art has only one picture.
+ */
+export async function loadDimmedTexture(url: string): Promise<Texture> {
+  const image = new Image();
+  image.src = url;
+  await image.decode();
+  const canvas = document.createElement("canvas");
+  canvas.width = image.naturalWidth;
+  canvas.height = image.naturalHeight;
+  const context = canvas.getContext("2d");
+  if (!context) return Texture.from(image);
+  context.filter = "grayscale(0.75) brightness(0.55)";
+  context.drawImage(image, 0, 0);
+  const texture = Texture.from(canvas);
+  texture.source.scaleMode = "linear";
+  return texture;
+}
+
 type Paint = (x: number, y: number, color: string) => void;
 
 function pixelTexture(

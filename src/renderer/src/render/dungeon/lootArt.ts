@@ -7,8 +7,15 @@ import {
   TRAP_IDS,
   type TrapKind,
 } from "../../../../engine/items";
-import { type ArtImage, type Feature, featureArt, itemArt, trapArt } from "../itemArt";
-import { loadImageTexture } from "./textures";
+import {
+  type ArtImage,
+  type Feature,
+  featureArt,
+  itemArt,
+  ownFeatureArt,
+  trapArt,
+} from "../itemArt";
+import { loadDimmedTexture, loadImageTexture } from "./textures";
 
 const FEATURES: readonly Feature[] = ["merchant", "beacon", "beacon-lit"];
 
@@ -17,6 +24,8 @@ export interface LootTextures {
   trap(kind: TrapKind): Texture;
   /** The merchant's stall and the Beacon (unlit and lit). */
   feature(feature: Feature): Texture;
+  /** The owner's camp art, ready and used (dimmed), or null to draw the camp instead. */
+  readonly camp: { readonly ready: Texture; readonly used: Texture } | null;
   destroy(): void;
 }
 
@@ -41,13 +50,27 @@ export async function loadLootTextures(): Promise<LootTextures> {
       FEATURES.map(async (feature) => [feature, await load(featureArt(feature))] as const),
     ),
   );
+  // With only one Beacon picture from the owner, it is the lit Beacon, and a dimmed copy stands
+  // for the Beacon before it is rekindled.
+  const beacon = ownFeatureArt("beacon");
+  if (beacon && !ownFeatureArt("beacon-lit")) {
+    features.get("beacon-lit")?.destroy(true);
+    features.set("beacon-lit", features.get("beacon") as Texture);
+    features.set("beacon", await loadDimmedTexture(beacon));
+  }
+  const campArt = ownFeatureArt("camp");
+  const camp = campArt
+    ? { ready: await loadImageTexture(campArt), used: await loadDimmedTexture(campArt) }
+    : null;
   return {
+    camp,
     item: (id) => items.get(id) ?? Texture.WHITE,
     trap: (kind) => traps.get(kind) ?? Texture.WHITE,
     feature: (feature) => features.get(feature) ?? Texture.WHITE,
     destroy: () => {
-      for (const texture of [...items.values(), ...traps.values(), ...features.values()])
-        texture.destroy(true);
+      const all = new Set([...items.values(), ...traps.values(), ...features.values()]);
+      if (camp) all.add(camp.ready).add(camp.used);
+      for (const texture of all) texture.destroy(true);
     },
   };
 }

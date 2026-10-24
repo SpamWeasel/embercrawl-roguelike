@@ -145,6 +145,21 @@ art matches; descriptions are new.
 - Fix: the key hints, the action button and the how-to-play card now show the player's own key
   bindings.
 
+**Built in milestone 8** (art pass, at the owner's request before the testing phase):
+- **43 more of the owner's icons** in the game: 22 creatures (every creature now has art), 17
+  weapons, armors and supplies, gold, the supply cache, the camp and the Beacon. Art already in
+  the game was kept as it was.
+- **`scripts/import-art.mts`** imports art from now on: it matches each file name to a game id,
+  removes a flat black, white or grey background (sealing small breaks in outlines so dark
+  insides stay solid), trims, centers and scales to 128 × 128, never overwrites existing art
+  unless asked, and makes a contact sheet for checking.
+- **The camp can have art** (`camp.png`); a used camp shows it dimmed. With only one Beacon
+  picture, the lit Beacon shows it as it is and the unlit one a dimmed, greyed copy.
+- Not matched to anything in the game, so not imported: "void hauberk" (no such armor; ring mail
+  is the one armor still without art), "spike trap" (the traps are the ember vent, alarm glyph
+  and gloom rune), the logo and the banner. Still without art: ring mail, the three traps and
+  the merchant.
+
 ## 2. Diagonal movement
 
 - Hero and monsters move in 8 directions. A diagonal step costs one turn, like any other.
@@ -302,9 +317,10 @@ Embercrawl.exe (Electron)
 | 5 ✅ | Full descent: 30 floors of content, guardians, shops, victory; bot re-tuned to 25–35% | Play a whole run |
 | 6 ✅ | Ready for testers: character management (rename, delete, export/import, backups, saves folder), settings (key remapping, interface size, motion), run history and achievements, a bug-report button, small fixes; ends with the **0.9.0 beta** | Hand the game to testers |
 | 7 ✅ | Sound effects (music afterwards, if at all: undecided) | Hear the game |
-| 8 | Testing and refinement: longer play-testing with the owner and testers, bug fixes, balance, new feature ideas | Trust the game |
-| 9 | Art pass, gamepad, file association | |
-| 10 | **1.0** release prep: signed installers, store page (itch.io or Steam), auto-update | Share it with players |
+| 8 ✅ | Art pass: the owner's icons for every creature and most items, an art import script | See the game as drawn |
+| 9 | Testing and refinement: longer play-testing with the owner and testers, bug fixes, balance, new feature ideas | Trust the game |
+| 10 | Gamepad, file association, remaining art | |
+| 11 | **1.0** release prep: signed installers, store page (itch.io or Steam), auto-update | Share it with players |
 
 Each milestone ends with `pnpm check` and the smoke test passing, and a commit.
 
@@ -321,4 +337,4 @@ aren't installed through Steam.
 - After milestone 7 comes a testing phase (bugs, refinement, new features); 1.0 comes after
   that, not at milestone 7 (decided 2026-10-24).
 - Operating systems beyond Windows (macOS, Linux/Steam Deck): deferred.
-- Distribution (itch.io or Steam): decide at milestone 10.
+- Distribution (itch.io or Steam): decide at milestone 11.

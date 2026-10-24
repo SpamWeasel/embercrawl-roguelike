@@ -45,8 +45,11 @@ The owner is new to development tooling. Explain setup steps and trade-offs plai
   to them; descriptions are Embercrawl's own (`src/engine/creatures.ts`).
 - **Art is picked up by file name** (transparent PNG, ideally 128×128), replacing the generated
   placeholder: `src/renderer/src/assets/sprites/creatures/<creature id>.png`,
-  `.../items/<item id>.png` (the supply cache's id is `cache`) and `.../traps/<trap id>.png`.
-  Ids are in `src/engine/creatures.ts` and `src/engine/items.ts`.
+  `.../items/<item id>.png` (the supply cache's id is `cache`) and `.../traps/<trap id>.png`;
+  fixtures (`hero`, `stairs-up`, `stairs-down`, `merchant`, `camp`, `beacon`, `beacon-lit`) sit
+  directly in `sprites/`. Ids are in `src/engine/creatures.ts` and `src/engine/items.ts`. Import
+  the owner's art with `scripts/import-art.mts` (it removes backgrounds and never overwrites
+  existing art unless told to), then check its contact sheet by eye before committing.
 - **Sound** is made in code (`src/renderer/src/audio/synth.ts`); the owner's files replace a sound
   by name: `src/renderer/src/assets/sounds/<sound id>.ogg` (or `-1`, `-2` … takes; ids in
   `audio/sounds.ts`). Sounds play with their animation in `DungeonView`, never delay the rules,
@@ -69,6 +72,7 @@ The owner is new to development tooling. Explain setup steps and trade-offs plai
 | `pnpm format` | Biome auto-format and import sorting |
 | `pnpm smoke` | Builds, then launches (silently) the title screen, Settings, Records, the game, and the game with the pack or the merchant panel open, with throwaway saves; screenshots and reports in `.smoke/`; fails on console errors |
 | `node scripts/smoke.mjs <path\to\Embercrawl.exe>` | Same check against a packaged build |
+| `pnpm exec tsx scripts/import-art.mts <folder> --sheet <file.png>` | Imports the owner's art by file name: removes the background, trims, scales to 128×128; skips existing art unless `--replace`; `--dry-run` shows the matches |
 | `pnpm balance [runs] [first seed]` | The balance bot plays whole descents and reports the win rate (target 25–35%); tuning seeds 1–300, check seeds from 100001 |
 | `pnpm exec tsx scripts/demo-saves.mts <folder> [--showcase] <floor>...` | Demo characters already on chosen floors, one user-data folder per floor; `--showcase` gathers creatures around the hero, lays out items, a cache and a found trap, and stocks the pack; `--merchant` stands the hero at a merchant with gold; `--won` makes a won floor 30 |
 | `pnpm dist` | Builds into `release/<version>/`, for x64 and ARM64 each: a zip to unpack and run (no install), a single portable exe, and an installer |

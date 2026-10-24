@@ -190,6 +190,11 @@ const FEATURE_ART = import.meta.glob<string>("../assets/sprites/*.png", {
   import: "default",
 });
 
+/** The owner's picture `assets/sprites/<name>.png` (a camp, a lit Beacon …), if there is one. */
+export function ownFeatureArt(name: string): string | undefined {
+  return FEATURE_ART[`../assets/sprites/${name}.png`];
+}
+
 /** The picture for a fixture: `assets/sprites/<name>.png` if it exists, else a drawn placeholder. */
 export function featureArt(feature: Feature): ArtImage {
   return remember(`feature:${feature}`, () => {

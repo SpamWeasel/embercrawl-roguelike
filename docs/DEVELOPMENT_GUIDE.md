@@ -1,7 +1,7 @@
 # Embercrawl development guide
 
 How every mechanism in Embercrawl works, where it lives in the code, and how to change it safely.
-Written for version 0.10.1 (milestone 7, sound). `docs/PLAN.md` says *what* we're building and why; this
+Written for version 0.11.0 (milestone 8, art). `docs/PLAN.md` says *what* we're building and why; this
 guide says *how it works now*. Update both when a mechanic changes.
 
 ## Contents
@@ -662,7 +662,29 @@ Clicking the map walks there. It hides while the pack or the merchant's panel is
 ### Art
 
 Drop a transparent PNG (ideally 128 × 128) named after the thing's id, and it replaces the drawn
-placeholder automatically:
+placeholder automatically. The easy way is the import script, which does the cleanup too:
+
+```
+pnpm exec tsx scripts/import-art.mts <folder of images> --sheet check.png
+```
+
+It matches file names to ids (`emberdepths_monster_gear_hound_icon.jpg` → `gear-hound`; words
+like icon, monster, item and map are ignored), removes a flat black, white or grey background,
+trims, centers and scales to 128 × 128 and writes the PNG to the right folder. It never
+overwrites art the game already has unless given `--replace` (with `--only id,id` to pick
+which). It lists files that matched nothing. `--sheet` writes a contact sheet showing each
+result on a dark floor and on a light check, so leftover background or eaten edges stand out.
+If an image needs it, `--threshold id=N` changes how different from the background a pixel must
+be to count as picture (default 26; higher removes more).
+
+How the background removal works (`cutOut` in the script): the background colors are read from
+the image's edge (one or two of black, white, grey); everything connected to the edge in those
+colors is cleared, after small breaks in the picture's outline are sealed, so a figure whose
+inside is as dark as the background (the Null Shade) stays solid. Enclosed pockets of background
+are also cleared on light backgrounds (the gaps between a spider's legs), but not on black ones,
+where they're usually the picture's own shadows. Edge pixels get soft transparency with the
+background color taken out of them, so no white or black fringe is left; tiny leftovers right at
+the image edge are dropped.
 
 | Kind | Folder | Ids in |
 |---|---|---|
@@ -671,8 +693,13 @@ placeholder automatically:
 | Traps | `src/renderer/src/assets/sprites/traps/<id>.png` | `items.ts` (`TRAPS`) |
 
 The hero and stairs are `hero.png`, `stairs-down.png` and `stairs-up.png` in `assets/sprites/`.
-The merchant's stall and the Beacon are `merchant.png`, `beacon.png` and `beacon-lit.png` there
-too; gold piles are `items/gold.png`.
+The merchant's stall, the camp and the Beacon are `merchant.png`, `camp.png`, `beacon.png`
+and `beacon-lit.png` there too; gold piles are `items/gold.png`. A used camp shows its picture
+dimmed and greyed. With only `beacon.png`, the lit Beacon shows it as it is and the unlit Beacon
+a dimmed copy (`loadDimmedTexture` in `textures.ts`); add `beacon-lit.png` to draw them apart.
+
+Every creature has art. Still drawn as placeholders: ring mail, the three traps and the
+merchant.
 
 ### Sound
 
@@ -890,6 +917,7 @@ Test files (`tests/`):
 | `main/save-store.test.ts` | Writing save files safely, rename, delete, backups and restore, export and import |
 | `main/settings.test.ts` | Reading and writing settings, key bindings, sound settings |
 | `renderer/palettes.test.ts`, `motion.test.ts` | Palettes and animation helpers |
+| `scripts/import-art.test.ts` | The art import script matches file names to the right ids |
 | `renderer/sounds.test.ts` | Sound file names, volume curve, placement, creature voices, the background air by depth |
 
 ### The balance bot (`src/bot/bot.ts`, `scripts/balance.mts`)
@@ -940,6 +968,7 @@ the owner's art fits), and its rules as a starting point, then improves on them.
 | 6 | `cb4e061` | 0.9.0 | Beta: character management (rename, delete to the Recycle Bin, export/import, backups and restore), settings and key remapping, run history and achievements, bug reports, tester notes |
 | 7 | `bbb3898` | 0.10.0 | Sound: 47 effects made in code, placed left or right, creature voices, background air by depth, volume settings and mute, your own sound files by name; key hints follow your bindings |
 | — | `6847e69` | 0.10.1 | The title screen loses its tagline |
+| 8 | (see git log) | 0.11.0 | Art pass: the owner's icons for all 25 creatures and most items, gold, the cache, the camp and the Beacon; the art import script |
 
 Key decisions along the way (details in `docs/PLAN.md`):
 
@@ -960,7 +989,8 @@ Key decisions along the way (details in `docs/PLAN.md`):
 
 From the plan's later milestones:
 
-- **Milestone 8:** testing and refinement: longer play-testing, bug fixes, balance and new
+- **Milestone 9:** testing and refinement: longer play-testing, bug fixes, balance and new
   feature ideas. Music is still undecided.
-- **Milestone 9:** art pass, gamepad support, opening a `.embercrawl` file by double-clicking it.
-- **Milestone 10:** the 1.0 release (signed builds, store page, updates).
+- **Milestone 10:** gamepad support, opening a `.embercrawl` file by double-clicking it, and the
+  remaining art (ring mail, traps, merchant).
+- **Milestone 11:** the 1.0 release (signed builds, store page, updates).

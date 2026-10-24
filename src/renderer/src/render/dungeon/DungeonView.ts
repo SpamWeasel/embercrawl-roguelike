@@ -850,7 +850,9 @@ export class DungeonView {
     this.camp.visible = camp !== null;
     this.campGlow.visible = camp !== null && !floor.campUsed;
     if (!camp) return;
-    this.camp.texture = floor.campUsed ? this.campTextures.spent : this.campTextures.lit;
+    const art = this.lootTextures.camp;
+    if (art) this.camp.texture = floor.campUsed ? art.used : art.ready;
+    else this.camp.texture = floor.campUsed ? this.campTextures.spent : this.campTextures.lit;
     this.camp.position.set(camp.x * TILE_PIXELS, camp.y * TILE_PIXELS);
     this.camp.setSize(TILE_PIXELS, TILE_PIXELS);
     this.campGlow.position.set((camp.x + 0.5) * TILE_PIXELS, (camp.y + 0.55) * TILE_PIXELS);
