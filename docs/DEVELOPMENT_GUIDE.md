@@ -1,7 +1,7 @@
 # Embercrawl development guide
 
 How every mechanism in Embercrawl works, where it lives in the code, and how to change it safely.
-Written for version 0.10.0 (milestone 7, sound). `docs/PLAN.md` says *what* we're building and why; this
+Written for version 0.10.1 (milestone 7, sound). `docs/PLAN.md` says *what* we're building and why; this
 guide says *how it works now*. Update both when a mechanic changes.
 
 ## Contents
@@ -939,6 +939,7 @@ the owner's art fits), and its rules as a starting point, then improves on them.
 | 5 | `86bdb60` | 0.5.0 | Gold, merchants, guardians sealing the stairs, the Beacon and victory, the balance bot and tuning, the minimap, how-to-play, the version on the title screen |
 | 6 | `cb4e061` | 0.9.0 | Beta: character management (rename, delete to the Recycle Bin, export/import, backups and restore), settings and key remapping, run history and achievements, bug reports, tester notes |
 | 7 | `bbb3898` | 0.10.0 | Sound: 47 effects made in code, placed left or right, creature voices, background air by depth, volume settings and mute, your own sound files by name; key hints follow your bindings |
+| — | `6847e69` | 0.10.1 | The title screen loses its tagline |
 
 Key decisions along the way (details in `docs/PLAN.md`):
 
