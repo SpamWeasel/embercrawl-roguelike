@@ -17,7 +17,7 @@
     "check": "pnpm typecheck && pnpm lint && pnpm test",
     "smoke": "pnpm build && node scripts/smoke.mjs",
     "balance": "tsx scripts/balance.mts",
-    "dist": "pnpm build && electron-builder --win"
+    "dist": "pnpm build && node scripts/dist.mjs"
   },
   "devDependencies": {
     "@biomejs/biome": "^2.5.15",

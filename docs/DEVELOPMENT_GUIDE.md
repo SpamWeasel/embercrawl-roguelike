@@ -895,7 +895,7 @@ level gains; gear power; `CREATURE_ATTACK_BASE` (coarse: see section 7).
 | `pnpm balance 200 1` | The balance bot plays 200 whole descents (seeds 1–200) and reports the win rate, where runs end and what kills them |
 | `pnpm dev:web` | Runs the game in a browser at http://localhost:5173 (saves in the browser) |
 | `pnpm dev` | Runs the desktop app with hot reload |
-| `pnpm dist` | Builds into `release/<version>/`, for x64 and ARM64 each: `Embercrawl-<version>-<arch>.zip` (unzip and run `Embercrawl.exe`, no install), `Embercrawl-<version>-portable-<arch>.exe` (one file, no install, unpacks itself on each launch so it starts a little slower) and `Embercrawl-Setup-<version>-<arch>.exe` (installer). All keep saves in `%APPDATA%\Embercrawl`. |
+| `pnpm dist` | Builds into `release/<version>/`, for x64 and ARM64 each: `Embercrawl-<version>-<arch>.zip` (unzip and run `Embercrawl.exe`, no install), `Embercrawl-<version>-portable-<arch>.exe` (one file, no install, unpacks itself on each launch so it starts a little slower) and `Embercrawl-Setup-<version>-<arch>.exe` (installer). All keep saves in `%APPDATA%\Embercrawl`. `scripts/dist.mjs` forces the BCJ 7-Zip filter: the portable exe and installer unpack with an older 7-Zip that cannot read the ARM64 filter newer 7-Zip uses, so without it the ARM64 portable exe quits before the game starts. |
 | `pnpm exec tsx scripts/demo-saves.mts .demo --showcase 4 14` | Makes demo characters already on chosen floors (see `CLAUDE.md` to launch them); `--merchant` stands one at a merchant with gold, `--won` makes a won floor 30 |
 
 Test files (`tests/`):
