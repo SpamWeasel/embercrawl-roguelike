@@ -938,7 +938,7 @@ the owner's art fits), and its rules as a starting point, then improves on them.
 | — | `28725ae` | 0.4.0 | No-install builds: a zip and a portable exe alongside the installer |
 | 5 | `86bdb60` | 0.5.0 | Gold, merchants, guardians sealing the stairs, the Beacon and victory, the balance bot and tuning, the minimap, how-to-play, the version on the title screen |
 | 6 | `cb4e061` | 0.9.0 | Beta: character management (rename, delete to the Recycle Bin, export/import, backups and restore), settings and key remapping, run history and achievements, bug reports, tester notes |
-| 7 | (see git log) | 0.10.0 | Sound: 47 effects made in code, placed left or right, creature voices, background air by depth, volume settings and mute, your own sound files by name; key hints follow your bindings |
+| 7 | `bbb3898` | 0.10.0 | Sound: 47 effects made in code, placed left or right, creature voices, background air by depth, volume settings and mute, your own sound files by name; key hints follow your bindings |
 
 Key decisions along the way (details in `docs/PLAN.md`):
 
