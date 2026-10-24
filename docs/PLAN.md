@@ -127,8 +127,23 @@ art matches; descriptions are new.
 - Fixes: the hero now draws in front of the merchant's stall; the merchant panel's Buy/Sell
   button stays in view without scrolling; dark scroll bars.
 - Saves move to format 5, with an upgrade from format 4 tested against a genuine version-4 save.
-- Moved to milestone 8: gamepad, "export all", and opening a `.embercrawl` file by
+- Moved to a later milestone: gamepad, "export all", and opening a `.embercrawl` file by
   double-clicking it.
+
+**Built in milestone 7** (sound effects; music stays undecided):
+- **47 sound effects, all made in code** (no recordings, nothing borrowed): footsteps, blows,
+  creature cries and warnings, deaths, items, traps, the lantern, stairs, gold, menus and the
+  Beacon's rekindling. Each plays when its animation shows the event, never delaying the game.
+- Sounds come from where things happen (left or right, softer far away); each creature has its
+  own voice; creatures out of sight stay silent, so sound never reveals hidden things.
+- **Background air** on every floor, deeper further down, with drips and distant rumbles; floor
+  30 has its own.
+- **Settings:** sound on/off, master, effects, menus and background volumes, and going quiet
+  when another window is in front. **N** (remappable) and a speaker button turn sound off.
+- **The owner's own sounds** replace any built-in one by file name, like the art
+  (`assets/sounds/<id>.ogg`).
+- Fix: the key hints, the action button and the how-to-play card now show the player's own key
+  bindings.
 
 ## 2. Diagonal movement
 
@@ -286,9 +301,10 @@ Embercrawl.exe (Electron)
 | 4 ✅ | Items and inventory (healing, gear, traps), tooltips and comparisons | Gear up |
 | 5 ✅ | Full descent: 30 floors of content, guardians, shops, victory; bot re-tuned to 25–35% | Play a whole run |
 | 6 ✅ | Ready for testers: character management (rename, delete, export/import, backups, saves folder), settings (key remapping, interface size, motion), run history and achievements, a bug-report button, small fixes; ends with the **0.9.0 beta** | Hand the game to testers |
-| 7 | Sound effects (music afterwards, if at all: undecided) | Hear the game |
-| 8 | Art pass, gamepad, file association | |
-| 9 | Release prep: signed installers, store page (itch.io or Steam), auto-update | Share it with players |
+| 7 ✅ | Sound effects (music afterwards, if at all: undecided) | Hear the game |
+| 8 | Testing and refinement: longer play-testing with the owner and testers, bug fixes, balance, new feature ideas | Trust the game |
+| 9 | Art pass, gamepad, file association | |
+| 10 | **1.0** release prep: signed installers, store page (itch.io or Steam), auto-update | Share it with players |
 
 Each milestone ends with `pnpm check` and the smoke test passing, and a commit.
 
@@ -302,5 +318,7 @@ aren't installed through Steam.
 
 - Music: the owner isn't sure the game needs music right away; sound effects come first
   (decided 2026-10-24).
+- After milestone 7 comes a testing phase (bugs, refinement, new features); 1.0 comes after
+  that, not at milestone 7 (decided 2026-10-24).
 - Operating systems beyond Windows (macOS, Linux/Steam Deck): deferred.
-- Distribution (itch.io or Steam): decide at milestone 9.
+- Distribution (itch.io or Steam): decide at milestone 10.

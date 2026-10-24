@@ -1,7 +1,7 @@
 # Embercrawl development guide
 
 How every mechanism in Embercrawl works, where it lives in the code, and how to change it safely.
-Written for version 0.9.0 (milestone 6, the beta). `docs/PLAN.md` says *what* we're building and why; this
+Written for version 0.10.0 (milestone 7, sound). `docs/PLAN.md` says *what* we're building and why; this
 guide says *how it works now*. Update both when a mechanic changes.
 
 ## Contents
@@ -18,7 +18,7 @@ guide says *how it works now*. Update both when a mechanic changes.
 10. [Traps](#10-traps)
 11. [Guardians, the Beacon, death and records](#11-guardians-the-beacon-death-and-records)
 12. [Saves](#12-saves)
-13. [Presentation: palettes, animation and art](#13-presentation-palettes-animation-and-art)
+13. [Presentation: palettes, animation, art and sound](#13-presentation-palettes-animation-art-and-sound)
 14. [Controls](#14-controls)
 15. [Tuning cookbook](#15-tuning-cookbook)
 16. [Testing and tools](#16-testing-and-tools)
@@ -600,6 +600,9 @@ Files: `src/shared/settings.ts` (what a setting can be, default keys), `src/main
 - **Interface size** (90%, 100%, 115%, 130%): the window's zoom, set by the main process.
 - **Motion:** follow Windows, or always reduced (no bob, shake or particles).
 - **Map:** the minimap's starting size (small, large, hidden).
+- **Sound:** on or off (also the N key and the speaker button in the top bar), master volume,
+  and separate sliders for effects, menus and buttons, and the background air (0–100%, saved as
+  whole numbers). By default the game goes quiet while another window is in front.
 - **Fullscreen** toggle, and **Controls**: up to 3 keys per action. Esc, F11, the Windows key
   and 1–0 (pack slots) are fixed. A key given to one action is taken from any other.
 - A damaged or partly invalid file falls back to the default for each bad setting, never an
@@ -617,7 +620,7 @@ Changing a number (healing, damage, weights) does **not** need a format change.
 
 ---
 
-## 13. Presentation: palettes, animation and art
+## 13. Presentation: palettes, animation, art and sound
 
 ### Floor palettes (`render/dungeon/palettes.ts`)
 
@@ -671,6 +674,97 @@ The hero and stairs are `hero.png`, `stairs-down.png` and `stairs-up.png` in `as
 The merchant's stall and the Beacon are `merchant.png`, `beacon.png` and `beacon-lit.png` there
 too; gold piles are `items/gold.png`.
 
+### Sound
+
+Files: `src/renderer/src/audio/sounds.ts` (the list of sounds and the pure helpers),
+`synth.ts` (how each sound is made), `player.ts` (playing them), and the `play(...)` calls in
+`DungeonView.handleEvents` (which sound goes with which event).
+
+- **Every sound is made in code**, so the game ships no recordings. Each sound is a *recipe* in
+  `synth.ts`: tones and filtered noise with a volume shape, rendered once into a buffer when the
+  game starts (about half a second in the background). Recipes are seeded, so a sound is the
+  same on every launch. Footsteps, hits, coins and a few others have 2–4 takes picked at random,
+  and effects play at a slightly random pitch (±3%) so repeats don't sound mechanical.
+- **Sounds play when the animation shows the thing happening**, not when the rule applies: the
+  hit sound with the hit flash, the footstep when the step lands. They never delay the game.
+- **Where a sound happens matters:** it is placed left or right of the hero and softer further
+  away (`placeSound`). Creatures speak in their own voice: small, quick ones higher, slow ones
+  and guardians deeper (`creatureVoice`). Slow (heavy) creatures' footsteps are heard.
+- **Hidden things stay silent:** a creature out of sight makes no sound (`inSight`), so sound
+  never gives away what the hero can't see.
+- **The mix:** each sound → its slider's group (effects, menus and buttons, background air) →
+  master volume → a limiter (so a pile-up never distorts) → speakers. Effects also feed a soft
+  stone-hall echo. Sliders are squared (50% on the slider is a quarter of full power), which
+  sounds even to the ear.
+- **Background air** loops quietly on every floor, with water drips from random directions. It
+  gets lower and darker further down; from floor 8, distant rumbles join in, and floor 30 has its
+  own heavier air (`ambienceMood`).
+- Button presses click softly (any `<button>`; `data-sound="none"` opts out), and panels and
+  menus whoosh open and closed.
+- The smoke test runs silently, and its game screens fail if no sounds were made.
+
+**Replacing a sound with your own file.** Put a short `.ogg`, `.mp3` or `.wav` named after the
+sound's id in `src/renderer/src/assets/sounds/` (`hit.ogg`, or `hit-1.ogg`, `hit-2.ogg` … for
+several takes), then rebuild. Files are built into the game itself. Settings > Sound > "Listen to
+each sound" plays every sound and marks the ones replaced by a file. Make files start and end in
+silence (no clicks); the game sets their volume and placement. `ambience` loops, so its end
+should flow into its start.
+
+**Changing a built-in sound:** edit its recipe in `synth.ts`. `level` is its loudness (0–1);
+`length` its duration in seconds; `tone` and `noise` take a start time (`at`), a volume shape
+(`attack`, `hold`, `decay`) and a `gain`, and tones glide from `freq` to `to` (hertz).
+Keep sounds that play often (steps, swings, clicks) quiet and short.
+
+| Id | Slider | Plays for |
+|---|---|---|
+| `step` | Effects | The hero's footstep |
+| `heavy-step` | Effects | A heavy creature's footfall |
+| `bump` | Effects | Walking into a wall |
+| `swing` | Effects | The hero swings a weapon |
+| `hit` | Effects | A blow lands on a creature |
+| `hero-hurt` | Effects | The hero is struck |
+| `armor` | Effects | Armor or a ward soaks up some of a blow |
+| `bolt` | Effects | A creature's ranged attack |
+| `creature-notice` | Effects | A creature notices the hero |
+| `creature-ready` | Effects | A creature readies a strike (red marker) |
+| `creature-die` | Effects | A creature falls |
+| `guardian-die` | Effects | A guardian falls |
+| `death` | Effects | The hero falls |
+| `level-up` | Effects | A new level |
+| `stairs` | Effects | Going down the stairs |
+| `lantern-bright` | Effects | The lantern flares bright |
+| `lantern-dim` | Effects | The lantern dims |
+| `pulse` | Effects | A lantern pulse |
+| `rest` | Effects | Resting at a camp |
+| `denied` | Effects | Something can't be done (no charge, pack full …) |
+| `pickup` | Effects | Picking up an item |
+| `cache-open` | Effects | Breaking open a supply cache |
+| `coins` | Effects | Gold picked up, spent or earned |
+| `hoard` | Effects | A guardian's hoard spills out |
+| `equip-weapon` | Effects | Wielding a weapon |
+| `equip-armor` | Effects | Putting on armor |
+| `drop` | Effects | Dropping an item |
+| `heal` | Effects | A salve heals |
+| `vigor` | Effects | A vigor draught |
+| `charge` | Effects | An ember shard recharges the lantern |
+| `shield` | Effects | A ward sigil |
+| `flare` | Effects | A flare flask bursts |
+| `survey` | Effects | A survey lens maps the floor |
+| `waystone` | Effects | A waystone carries the hero away |
+| `trap-found` | Effects | A hidden trap is spotted |
+| `trap-ember-vent` | Effects | An ember vent erupts |
+| `trap-alarm-glyph` | Effects | An alarm glyph rings |
+| `trap-gloom-rune` | Effects | A gloom rune drains the light |
+| `sealed` | Effects | Stairs or Beacon held shut by a guardian |
+| `rekindle` | Effects | The Beacon is rekindled |
+| `ui-click` | Menus and buttons | Pressing a button |
+| `ui-open` | Menus and buttons | Opening a panel or menu |
+| `ui-close` | Menus and buttons | Closing a panel or menu |
+| `achievement` | Menus and buttons | An achievement is earned |
+| `ambience` | Background air | The deep's background air (loops) |
+| `drip` | Background air | Water dripping somewhere nearby |
+| `rumble` | Background air | Distant shifting stone, deeper down |
+
 ---
 
 ## 14. Controls
@@ -688,6 +782,7 @@ too; gold piles are `items/gold.png`.
 | In the pack | Arrows/WASD select, Enter use, X drop, Esc/I/Tab close |
 | At a merchant | Up/down or W/S select, Enter buy or sell, Esc close |
 | Map: small, large, hidden | M (or the buttons on the map) |
+| Sound on/off | N (or the speaker button in the top bar) |
 | How to play | H (or from the menu and title screen) |
 | Walk somewhere | Click an explored tile (any key stops the walk; danger stops it too) |
 | Menu | Esc |
@@ -769,7 +864,7 @@ level gains; gear power; `CREATURE_ATTACK_BASE` (coarse: see section 7).
 | Command | What it does |
 |---|---|
 | `pnpm check` | Type checks, lint and all tests |
-| `pnpm smoke` | Builds and launches the real app six times (title, settings, records, game, game with the pack open, game with the merchant's panel open); fails on any error; screenshots in `.smoke/` |
+| `pnpm smoke` | Builds and launches the real app six times (title, settings, records, game, game with the pack open, game with the merchant's panel open), silently; fails on any error, or if the game screens made no sounds; screenshots in `.smoke/` |
 | `pnpm balance 200 1` | The balance bot plays 200 whole descents (seeds 1–200) and reports the win rate, where runs end and what kills them |
 | `pnpm dev:web` | Runs the game in a browser at http://localhost:5173 (saves in the browser) |
 | `pnpm dev` | Runs the desktop app with hot reload |
@@ -793,8 +888,9 @@ Test files (`tests/`):
 | `engine/records.test.ts` | Achievements, tallies, run history, the version-4 upgrade |
 | `engine/fuzz.test.ts` | Thousands of random actions, checking the rules never break |
 | `main/save-store.test.ts` | Writing save files safely, rename, delete, backups and restore, export and import |
-| `main/settings.test.ts` | Reading and writing settings, key bindings |
+| `main/settings.test.ts` | Reading and writing settings, key bindings, sound settings |
 | `renderer/palettes.test.ts`, `motion.test.ts` | Palettes and animation helpers |
+| `renderer/sounds.test.ts` | Sound file names, volume curve, placement, creature voices, the background air by depth |
 
 ### The balance bot (`src/bot/bot.ts`, `scripts/balance.mts`)
 
@@ -842,6 +938,7 @@ the owner's art fits), and its rules as a starting point, then improves on them.
 | — | `28725ae` | 0.4.0 | No-install builds: a zip and a portable exe alongside the installer |
 | 5 | `86bdb60` | 0.5.0 | Gold, merchants, guardians sealing the stairs, the Beacon and victory, the balance bot and tuning, the minimap, how-to-play, the version on the title screen |
 | 6 | `cb4e061` | 0.9.0 | Beta: character management (rename, delete to the Recycle Bin, export/import, backups and restore), settings and key remapping, run history and achievements, bug reports, tester notes |
+| 7 | (see git log) | 0.10.0 | Sound: 47 effects made in code, placed left or right, creature voices, background air by depth, volume settings and mute, your own sound files by name; key hints follow your bindings |
 
 Key decisions along the way (details in `docs/PLAN.md`):
 
@@ -862,6 +959,7 @@ Key decisions along the way (details in `docs/PLAN.md`):
 
 From the plan's later milestones:
 
-- **Milestone 7:** sound effects. Music afterwards, if at all (undecided).
-- **Milestone 8:** art pass, gamepad support, opening a `.embercrawl` file by double-clicking it.
-- **Milestone 9:** release (signed builds, store page, updates).
+- **Milestone 8:** testing and refinement: longer play-testing, bug fixes, balance and new
+  feature ideas. Music is still undecided.
+- **Milestone 9:** art pass, gamepad support, opening a `.embercrawl` file by double-clicking it.
+- **Milestone 10:** the 1.0 release (signed builds, store page, updates).

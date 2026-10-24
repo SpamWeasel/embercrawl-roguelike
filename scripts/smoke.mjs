@@ -42,6 +42,13 @@ for (const scene of SCENES) {
   }
   const report = JSON.parse(readFileSync(reportPath, "utf8"));
   console.log(`[${scene}] ${JSON.stringify(report)}`);
+  // The game screens also confirm that every sound effect was made (or loaded) without error.
+  const needsSound = scene === "game" || scene === "pack" || scene === "shop";
+  if (needsSound && !(report.sounds > 0)) {
+    console.error(`[${scene}] failed: no sound effects were ready.`);
+    failed = true;
+    continue;
+  }
   if (result.status !== 0 || !report.ok) failed = true;
   else console.log(`[${scene}] passed. Screenshot: ${screenshot}`);
 }

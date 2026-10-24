@@ -300,6 +300,7 @@ function runSmokeTest(window: BrowserWindow, screenshotPath: string): void {
       errors,
       renderer: details?.renderer ?? null,
       scene: details?.scene ?? null,
+      sounds: typeof details?.sounds === "number" ? details.sounds : null,
       size,
     };
     await writeFile(`${screenshotPath}.json`, JSON.stringify(report, null, 2));

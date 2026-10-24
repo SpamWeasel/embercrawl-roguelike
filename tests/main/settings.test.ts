@@ -46,3 +46,28 @@ describe("settings", () => {
     expect(keyLabel("Space")).toBe("Space");
   });
 });
+
+describe("sound settings", () => {
+  it("default to sound on, at comfortable levels, for a settings file from before sound", () => {
+    const old = parseSettings({ uiScale: 1.15, motion: "system", minimap: "large" });
+    expect(old.uiScale).toBe(1.15);
+    expect(old.muted).toBe(false);
+    expect(old.muteInBackground).toBe(true);
+    expect(old.masterVolume).toBe(DEFAULT_SETTINGS.masterVolume);
+    expect(old.keys.mute).toEqual(["KeyN"]);
+  });
+
+  it("keep volumes between 0 and 100, whole numbers only", () => {
+    expect(parseSettings({ effectsVolume: 35 }).effectsVolume).toBe(35);
+    for (const bad of [-1, 101, 12.5, "50", null]) {
+      expect(parseSettings({ effectsVolume: bad }).effectsVolume).toBe(
+        DEFAULT_SETTINGS.effectsVolume,
+      );
+    }
+  });
+
+  it("give every key to one action only by default", () => {
+    const all = KEY_ACTIONS.flatMap((action) => DEFAULT_KEYS[action]);
+    expect(new Set(all).size).toBe(all.length);
+  });
+});

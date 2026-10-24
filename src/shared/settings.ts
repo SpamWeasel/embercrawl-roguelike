@@ -1,6 +1,6 @@
 /**
- * Player settings, kept per PC (not per character): interface size, motion, the map's size and
- * key bindings. The desktop app stores them in `settings.json` beside the saves; the browser
+ * Player settings, kept per PC (not per character): interface size, motion, the map's size,
+ * sound volumes and key bindings. The desktop app stores them in `settings.json` beside the saves; the browser
  * preview keeps them in browser storage. Both check them with `parseSettings`.
  */
 import { z } from "zod";
@@ -22,6 +22,7 @@ export const KEY_ACTIONS = [
   "pack",
   "map",
   "help",
+  "mute",
 ] as const;
 export type KeyAction = (typeof KEY_ACTIONS)[number];
 
@@ -45,6 +46,7 @@ export const DEFAULT_KEYS: Readonly<Record<KeyAction, readonly string[]>> = {
   pack: ["KeyI", "Tab"],
   map: ["KeyM"],
   help: ["KeyH"],
+  mute: ["KeyN"],
 };
 
 /** Keys that can't be bound, because they're fixed or belong to Windows. */
@@ -74,6 +76,15 @@ export interface Settings {
   /** "system" follows Windows' animation setting; "reduced" always uses calmer animation. */
   readonly motion: "system" | "reduced";
   readonly minimap: "small" | "large" | "hidden";
+  /** Volumes from 0 to 100. */
+  readonly masterVolume: number;
+  readonly effectsVolume: number;
+  readonly interfaceVolume: number;
+  readonly ambienceVolume: number;
+  /** All sound off (the mute key toggles it). */
+  readonly muted: boolean;
+  /** Silent while another window is in front. */
+  readonly muteInBackground: boolean;
   readonly keys: Readonly<Record<KeyAction, readonly string[]>>;
 }
 
@@ -81,10 +92,18 @@ export const DEFAULT_SETTINGS: Settings = {
   uiScale: 1,
   motion: "system",
   minimap: "small",
+  masterVolume: 80,
+  effectsVolume: 100,
+  interfaceVolume: 60,
+  ambienceVolume: 60,
+  muted: false,
+  muteInBackground: true,
   keys: DEFAULT_KEYS,
 };
 
 const KeyList = z.array(z.string().regex(/^[A-Za-z0-9]{1,24}$/)).max(KEYS_PER_ACTION);
+
+const Volume = z.number().int().min(0).max(100);
 
 const SettingsSchema = z.object({
   uiScale: z.union(
@@ -95,6 +114,12 @@ const SettingsSchema = z.object({
   ),
   motion: z.enum(["system", "reduced"]),
   minimap: z.enum(["small", "large", "hidden"]),
+  masterVolume: Volume,
+  effectsVolume: Volume,
+  interfaceVolume: Volume,
+  ambienceVolume: Volume,
+  muted: z.boolean(),
+  muteInBackground: z.boolean(),
   keys: z.partialRecord(z.enum(KEY_ACTIONS), KeyList),
 });
 
@@ -113,6 +138,12 @@ export function parseSettings(data: unknown): Settings {
     uiScale: pick("uiScale"),
     motion: pick("motion"),
     minimap: pick("minimap"),
+    masterVolume: pick("masterVolume"),
+    effectsVolume: pick("effectsVolume"),
+    interfaceVolume: pick("interfaceVolume"),
+    ambienceVolume: pick("ambienceVolume"),
+    muted: pick("muted"),
+    muteInBackground: pick("muteInBackground"),
     // Any action missing from a file (for example one added in a later version) gets its default.
     keys: Object.fromEntries(
       KEY_ACTIONS.map((action) => [

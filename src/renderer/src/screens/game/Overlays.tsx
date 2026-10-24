@@ -1,8 +1,11 @@
 import { useEffect, useRef } from "react";
 import type { RunState } from "../../../../engine/run";
+import type { KeyAction } from "../../../../shared/settings";
 import { toggleFullscreen } from "../../fullscreen";
 import { causeName } from "../../game/itemText";
 import { INTRO_LINES, INTRO_TITLE } from "../../game/lore";
+import { useSettings } from "../../settings/SettingsContext";
+import { keyHint, keyList } from "./KeyHints";
 
 /** Calls `onKey` for the given key codes while mounted. */
 export function useKeys(codes: readonly string[], onKey: (code: string) => void): void {
@@ -240,19 +243,29 @@ const HELP_KEYS = ["Escape", "KeyH", "Enter", "NumpadEnter"] as const;
 export function HelpCard({ onClose }: { onClose(): void }) {
   const focusRef = useFocusOnMount<HTMLButtonElement>();
   useKeys(HELP_KEYS, onClose);
+  const bound = useSettings().settings.keys;
+  const first = (actions: readonly KeyAction[]) => actions.map((a) => keyHint(bound, a)).join(" ");
   const keys: Array<[string, string]> = [
-    ["Move", "WASD or arrows (two together for diagonals), Q E Z C, number pad"],
+    [
+      "Move",
+      `${first(["move-n", "move-w", "move-s", "move-e"])} (two together for diagonals), ${first(["move-nw", "move-ne", "move-sw", "move-se"])}`,
+    ],
     ["Attack", "Move into a creature"],
-    ["Wait", "Space"],
-    ["Stairs, rest, trade, pick up", "Enter (or click the tile you stand on)"],
-    ["Lantern bright / dim", "L"],
-    ["Lantern pulse", "F"],
+    ["Wait", keyList(bound, "wait")],
+    [
+      "Stairs, rest, trade, pick up",
+      `${keyList(bound, "interact")} (or click the tile you stand on)`,
+    ],
+    ["Lantern bright / dim", keyList(bound, "lantern")],
+    ["Lantern pulse", keyList(bound, "pulse")],
     ["Use or equip an item", "1–9, 0"],
-    ["Pack", "I or Tab"],
-    ["Map: show, enlarge, hide", "M"],
+    ["Pack", keyList(bound, "pack")],
+    ["Map: show, enlarge, hide", keyList(bound, "map")],
+    ["Sound on / off", keyList(bound, "mute")],
     ["Walk somewhere", "Click a tile you have seen"],
     ["Menu", "Esc"],
     ["Fullscreen", "F11 or Alt+Enter"],
+    ["Change keys", "Settings, from the menu or the title screen"],
   ];
   return (
     <div className="absolute inset-0 z-30 grid place-items-center bg-black/70 backdrop-blur-[2px]">

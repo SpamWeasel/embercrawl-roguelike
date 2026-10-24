@@ -1,10 +1,19 @@
-import { createContext, type ReactNode, useCallback, useContext, useEffect, useState } from "react";
+import {
+  createContext,
+  type ReactNode,
+  useCallback,
+  useContext,
+  useEffect,
+  useRef,
+  useState,
+} from "react";
 import { DEFAULT_SETTINGS, type Settings } from "../../../shared/settings";
+import { sound } from "../audio/player";
 import { readableError, settingsService } from "../saves/saveService";
 
 interface SettingsValue {
   readonly settings: Settings;
-  /** Applies and stores new settings. */
+  /** Applies new settings at once and stores them (a moment later, so a dragged slider saves once). */
   update(next: Settings): void;
   /** True once the stored settings have been read. */
   readonly loaded: boolean;
@@ -51,15 +60,37 @@ export function SettingsProvider({ children }: { children: ReactNode }) {
     document.documentElement.classList.toggle("reduce-motion", settings.motion === "reduced");
   }, [settings.motion]);
 
+  // Sound follows the settings, and starts on the first key or click (browsers require one).
+  useEffect(() => sound.configure(settings), [settings]);
+  useEffect(() => {
+    void sound.load();
+    const unlock = () => sound.unlock();
+    const away = () => sound.setBackground(true);
+    const back = () => sound.setBackground(document.hidden);
+    window.addEventListener("pointerdown", unlock, true);
+    window.addEventListener("keydown", unlock, true);
+    window.addEventListener("blur", away);
+    window.addEventListener("focus", back);
+    document.addEventListener("visibilitychange", back);
+    return () => {
+      window.removeEventListener("pointerdown", unlock, true);
+      window.removeEventListener("keydown", unlock, true);
+      window.removeEventListener("blur", away);
+      window.removeEventListener("focus", back);
+      document.removeEventListener("visibilitychange", back);
+    };
+  }, []);
+
+  const pending = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   const update = useCallback((next: Settings) => {
     setSettings(next);
-    settingsService.save(next).then(
-      (stored) => {
-        setSettings(stored);
-        setError(null);
-      },
-      (failure: unknown) => setError(readableError(failure)),
-    );
+    clearTimeout(pending.current);
+    pending.current = setTimeout(() => {
+      settingsService.save(next).then(
+        () => setError(null),
+        (failure: unknown) => setError(readableError(failure)),
+      );
+    }, 250);
   }, []);
 
   return (

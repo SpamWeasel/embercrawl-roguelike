@@ -22,6 +22,8 @@ export interface GameKeyHandlers {
   map(): void;
   /** Open the how-to-play card. */
   help(): void;
+  /** Turn all sound off or back on. */
+  mute(): void;
 }
 
 /** Directions of the four movement actions that combine into diagonals when held together. */
@@ -56,6 +58,7 @@ function keyMaps(keys: Settings["keys"]) {
     pack: codes("pack"),
     map: codes("map"),
     help: codes("help"),
+    mute: codes("mute"),
   };
 }
 
@@ -188,6 +191,9 @@ export function useGameKeys(
       } else if (bound.help.has(code)) {
         event.preventDefault();
         if (!event.repeat) latest.current.help();
+      } else if (bound.mute.has(code)) {
+        event.preventDefault();
+        if (!event.repeat) latest.current.mute();
       } else if (bound.pack.has(code)) {
         event.preventDefault();
         if (!event.repeat) latest.current.inventory();

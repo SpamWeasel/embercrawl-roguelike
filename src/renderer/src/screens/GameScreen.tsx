@@ -14,6 +14,7 @@ import {
 } from "../../../engine/run";
 import { type CharacterSave, summarizeCharacter } from "../../../engine/save";
 import type { ReadyDetails, SaveBridge } from "../../../shared/bridge";
+import { sound } from "../audio/player";
 import { bugReport } from "../game/bugReport";
 import { lootName } from "../game/itemText";
 import { describeResult } from "../game/messages";
@@ -25,6 +26,7 @@ import { useSettings, wantsReducedMotion } from "../settings/SettingsContext";
 import { Dialog } from "./Dialog";
 import { InventoryPanel } from "./game/InventoryPanel";
 import { ItemIcon, TileTooltip } from "./game/ItemDetails";
+import { KeyHints, keyHint, SpeakerIcon } from "./game/KeyHints";
 import { type LogEntry, MessageLog } from "./game/MessageLog";
 import { Minimap, type MinimapSize, nextMinimapSize } from "./game/Minimap";
 import { DeathScreen, HelpCard, IntroCard, PauseMenu, VictoryScreen } from "./game/Overlays";
@@ -148,6 +150,24 @@ export function GameScreen({ initial, saves, startWith, onExit, onReady }: GameS
     return () => clearTimeout(timer);
   }, [run?.status, victoryShown]);
 
+  // The background air follows the hero down, and fades when the game is left.
+  const depth = run?.depth;
+  useEffect(() => {
+    if (depth !== undefined) sound.startAmbience(depth);
+  }, [depth]);
+  useEffect(() => () => sound.stopAmbience(), []);
+
+  // A soft whoosh as panels and menus open and close.
+  const panels = [menuOpen, packOpen, shopOpen, helpOpen, settingsOpen, recordsOpen, report].filter(
+    Boolean,
+  ).length;
+  const lastPanels = useRef(panels);
+  useEffect(() => {
+    if (panels > lastPanels.current) sound.play("ui-open");
+    else if (panels < lastPanels.current) sound.play("ui-close");
+    lastPanels.current = panels;
+  }, [panels]);
+
   const changeMapSize = useCallback(
     (size: MinimapSize) => updateSettings({ ...settings, minimap: size }),
     [settings, updateSettings],
@@ -158,6 +178,7 @@ export function GameScreen({ initial, saves, startWith, onExit, onReady }: GameS
     const fresh = character.record.achievements.filter((a) => !knownAchievements.current.has(a.id));
     if (fresh.length === 0) return;
     for (const a of fresh) knownAchievements.current.add(a.id);
+    sound.play("achievement", { delay: 0.25 });
     setToasts((previous) => [
       ...previous,
       ...fresh.map((a) => ({ key: logCount.current++, id: a.id })),
@@ -238,6 +259,17 @@ export function GameScreen({ initial, saves, startWith, onExit, onReady }: GameS
   }, [cancelWalk]);
   const closePack = useCallback(() => setPackOpen(false), []);
 
+  const toggleMute = useCallback(() => {
+    const muted = !settings.muted;
+    updateSettings({ ...settings, muted });
+    setLog((previous) =>
+      [
+        ...previous,
+        { text: muted ? "Sound off." : "Sound on.", tone: "info" as const, id: logCount.current++ },
+      ].slice(-LOG_LINES),
+    );
+  }, [settings, updateSettings]);
+
   useGameKeys(
     {
       move: (direction) => perform({ type: "move", direction }),
@@ -250,6 +282,7 @@ export function GameScreen({ initial, saves, startWith, onExit, onReady }: GameS
       itemSlot: applySlot,
       map: () => changeMapSize(nextMinimapSize(mapSize)),
       help: openHelp,
+      mute: toggleMute,
     },
     alive &&
       !menuOpen &&
@@ -316,7 +349,11 @@ export function GameScreen({ initial, saves, startWith, onExit, onReady }: GameS
         subscribe={subscribe}
         onTileClick={onTileClick}
         onHover={setHoverTile}
-        onReady={(renderer) => onReady({ renderer, scene: startWith ?? "game" })}
+        onReady={(renderer) =>
+          void sound
+            .load()
+            .then((sounds) => onReady({ renderer, scene: startWith ?? "game", sounds }))
+        }
       />
       {lowHealth && <div className="low-health pointer-events-none absolute inset-0 z-[5]" />}
 
@@ -343,6 +380,16 @@ export function GameScreen({ initial, saves, startWith, onExit, onReady }: GameS
             <ItemIcon id={GOLD} size={18} /> {run.gold}
           </span>
           <span>Turn {run.turn}</span>
+          <button
+            type="button"
+            className="btn btn-small"
+            onClick={toggleMute}
+            aria-pressed={settings.muted}
+            aria-label={settings.muted ? "Sound is off: turn it on" : "Sound is on: turn it off"}
+            title={`Sound on/off (${keyHint(settings.keys, "mute")})`}
+          >
+            <SpeakerIcon muted={settings.muted} />
+          </button>
           <button type="button" className="btn btn-small" onClick={openMenu}>
             Menu <kbd className="kbd">Esc</kbd>
           </button>
@@ -357,17 +404,11 @@ export function GameScreen({ initial, saves, startWith, onExit, onReady }: GameS
           {interaction && alive && (
             <button type="button" className="btn btn-primary" onClick={interact}>
               {interactionLabel(interaction)}
-              <kbd className="kbd">Enter</kbd>
+              <kbd className="kbd">{keyHint(settings.keys, "interact")}</kbd>
             </button>
           )}
           <MessageLog entries={log} />
-          <p className="text-center text-xs text-bone/45">
-            Move <kbd className="kbd">WASD</kbd> / arrows · diagonals{" "}
-            <kbd className="kbd">Q E Z C</kbd> · wait <kbd className="kbd">Space</kbd> · lantern{" "}
-            <kbd className="kbd">L</kbd> · pulse <kbd className="kbd">F</kbd> · pack{" "}
-            <kbd className="kbd">I</kbd> · items <kbd className="kbd">1</kbd>–
-            <kbd className="kbd">0</kbd> · use <kbd className="kbd">Enter</kbd>
-          </p>
+          <KeyHints keys={settings.keys} />
         </div>
         <div className="justify-self-end">
           <PackBar run={run} onUse={applySlot} onOpen={openPack} />

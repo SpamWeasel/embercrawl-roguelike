@@ -47,6 +47,10 @@ The owner is new to development tooling. Explain setup steps and trade-offs plai
   placeholder: `src/renderer/src/assets/sprites/creatures/<creature id>.png`,
   `.../items/<item id>.png` (the supply cache's id is `cache`) and `.../traps/<trap id>.png`.
   Ids are in `src/engine/creatures.ts` and `src/engine/items.ts`.
+- **Sound** is made in code (`src/renderer/src/audio/synth.ts`); the owner's files replace a sound
+  by name: `src/renderer/src/assets/sounds/<sound id>.ogg` (or `-1`, `-2` … takes; ids in
+  `audio/sounds.ts`). Sounds play with their animation in `DungeonView`, never delay the rules,
+  and stay silent for anything out of sight. Gameplay never depends on sound.
 - **Golden RNG values** in `tests/engine/rng.test.ts` change every dungeon from every seed. Only
   update them as a deliberate, stated decision.
 - **Security:** the game window reaches the PC only through `src/shared/bridge.ts` and
@@ -63,7 +67,7 @@ The owner is new to development tooling. Explain setup steps and trade-offs plai
 | `pnpm dev:web` | Game window only in a browser, at http://localhost:5173 (no Electron; saves in browser storage) |
 | `pnpm check` | Typecheck (engine, node, web) + Biome lint + Vitest |
 | `pnpm format` | Biome auto-format and import sorting |
-| `pnpm smoke` | Builds, then launches the title screen, Settings, Records, the game, and the game with the pack or the merchant panel open, with throwaway saves; screenshots and reports in `.smoke/`; fails on console errors |
+| `pnpm smoke` | Builds, then launches (silently) the title screen, Settings, Records, the game, and the game with the pack or the merchant panel open, with throwaway saves; screenshots and reports in `.smoke/`; fails on console errors |
 | `node scripts/smoke.mjs <path\to\Embercrawl.exe>` | Same check against a packaged build |
 | `pnpm balance [runs] [first seed]` | The balance bot plays whole descents and reports the win rate (target 25–35%); tuning seeds 1–300, check seeds from 100001 |
 | `pnpm exec tsx scripts/demo-saves.mts <folder> [--showcase] <floor>...` | Demo characters already on chosen floors, one user-data folder per floor; `--showcase` gathers creatures around the hero, lays out items, a cache and a found trap, and stocks the pack; `--merchant` stands the hero at a merchant with gold; `--won` makes a won floor 30 |
@@ -136,7 +140,7 @@ The owner is new to development tooling. Explain setup steps and trade-offs plai
   pack panel, tooltips and item/creature details, and overlays; `title/` holds the Manage dialog), `SettingsScreen`, `Records` (history and
   achievements), `Dialog`, `game/` (session, autosave,
   click-to-walk, timing, message text, item and creature wording, lore, bug report), `input/` (remappable keyboard), `settings/`
-  (settings context),
+  (settings context), `audio/` (sound list, synthesized recipes, the player),
   `saves/` (desktop or browser storage), `render/` (PixiJS; `itemArt` serves item and trap
   pictures to both PixiJS and React), `assets/sprites/` (the owner's art, picked up by file name)
 - `src/renderer/src/render/dungeon` — `DungeonView` (scene, frame loop, camera, light, event

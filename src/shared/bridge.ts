@@ -45,6 +45,8 @@ export interface ReadyDetails {
   /** Which PixiJS renderer started: "webgl", "webgpu" or "canvas". */
   renderer: string;
   scene: Scene;
+  /** How many sound effects were ready (the game screens report it). */
+  sounds?: number;
 }
 
 /** One entry in the character list. Damaged files are listed so the player knows they exist. */

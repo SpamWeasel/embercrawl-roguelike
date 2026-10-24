@@ -4,7 +4,8 @@ EMBERCRAWL - BETA (please read me)
 Thank you for testing Embercrawl! It's a turn-based dungeon crawl: descend thirty floors of a
 buried observatory, defeat the Beacon Warden at the bottom, and rekindle the Beacon.
 
-This is a beta. Things may break, and sound isn't in the game yet.
+This is a beta. Things may break. Sound is new: N turns it on and off, and Settings has
+volume sliders.
 
 
 STARTING THE GAME
@@ -45,3 +46,4 @@ Things the developer would love to hear about:
 - Where you died, and whether it felt fair.
 - Anything confusing, or anything you looked for and couldn't find.
 - How far you got, and how long it took.
+- Any sound that is too loud, too quiet, annoying, or missing where you expected one.

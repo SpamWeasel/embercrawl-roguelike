@@ -1,7 +1,7 @@
 // Lets PixiJS run under the packaged game's content security policy, which forbids eval().
 import "pixi.js/unsafe-eval";
 import { Application, Container, Graphics, Sprite, Texture } from "pixi.js";
-import { creatureKind, type Monster } from "../../../../engine/creatures";
+import { type CreatureId, creatureKind, type Monster } from "../../../../engine/creatures";
 import type { Floor } from "../../../../engine/generate";
 import {
   DIRECTION_VECTORS,
@@ -23,6 +23,14 @@ import {
 } from "../../../../engine/map";
 import { PULSE_RADIUS } from "../../../../engine/rules";
 import { type GameEvent, type Hero, walkRoute } from "../../../../engine/run";
+import { sound } from "../../audio/player";
+import {
+  creatureVoice,
+  hasHeavyStep,
+  isGuardian,
+  placeSound,
+  type SoundId,
+} from "../../audio/sounds";
 import { STEP_MS } from "../../game/timing";
 import { CreatureRig } from "./CreatureRig";
 import { cameraOffset, crispScale, snapToPixel } from "./camera";
@@ -343,6 +351,7 @@ export class DungeonView {
         case "blocked": {
           const { x, y } = DIRECTION_VECTORS[event.direction];
           this.hero.startBump(x, y);
+          this.play("bump");
           this.bumpDust(event.direction);
           if (!this.reducedMotion) this.shake = Math.max(this.shake, 1.6);
           break;
@@ -350,7 +359,9 @@ export class DungeonView {
         case "attacked": {
           const { x, y } = DIRECTION_VECTORS[event.direction];
           this.hero.lunge(x, y);
+          this.play("swing", null, { gain: 0.8 });
           this.later(70, () => {
+            this.play("hit", event.at);
             this.rigs.get(event.target)?.flash();
             this.effects.number(
               this.centerOf(event.at, 0.4),
@@ -367,16 +378,21 @@ export class DungeonView {
           if (rig) rig.doomed = true;
           this.later(120, () => {
             rig?.die();
+            const guardian = isGuardian(event.kind);
+            this.play(guardian ? "guardian-die" : "creature-die", event.at, {
+              rate: guardian ? 1 : creatureVoice(event.kind),
+            });
             this.sparks(event.at, creatureKind(event.kind).color, 16);
             this.effects.number(this.centerOf(event.at, 0.8), `+${event.xp} xp`, LEVEL_COLOR);
             if (event.gold > 0)
-              this.later(180, () =>
+              this.later(180, () => {
+                this.play("coins", event.at, { gain: 0.6 });
                 this.effects.label(
                   this.centerOf(event.at, 1.25),
                   `+${event.gold} gold`,
                   GOLD_COLOR,
-                ),
-              );
+                );
+              });
           });
           break;
         }
@@ -384,6 +400,7 @@ export class DungeonView {
           const delay = heroStepped ? this.stepMs * 0.7 : 30;
           this.loot.pickUp(event.loot, delay);
           this.later(delay, () => {
+            this.play("coins", event.at);
             this.coinBurst(event.at, 10);
             this.effects.label(this.centerOf(event.at, 1.05), `+${event.amount} gold`, GOLD_COLOR);
           });
@@ -391,6 +408,7 @@ export class DungeonView {
         }
         case "hoard":
           this.later(420, () => {
+            this.play("hoard", event.at);
             this.coinBurst(event.at, 30);
             this.effects.ring(this.centerOf(event.at, 0.5), TILE_PIXELS * 2, GOLD_COLOR, 600);
             this.effects.label(
@@ -403,6 +421,7 @@ export class DungeonView {
         case "bought":
         case "sold": {
           const at = this.expectedHero ?? this.display;
+          this.play("coins");
           this.coinBurst(at, 8);
           this.effects.label(
             this.centerOf(at, 1.05),
@@ -414,6 +433,7 @@ export class DungeonView {
         case "stairs-sealed":
         case "beacon-smothered": {
           const at = this.expectedHero ?? this.display;
+          this.play("sealed");
           this.effects.ring(this.centerOf(at, 0.5), TILE_PIXELS * 1.2, 0xff6a5a, 420);
           this.effects.label(
             this.centerOf(at, 1.1),
@@ -431,10 +451,26 @@ export class DungeonView {
           if (!rig) break;
           rig.steps.push({ from: event.from, to: event.to });
           rig.expected = event.to;
+          const kind = this.monstersById.get(event.id)?.kind;
+          if (kind && hasHeavyStep(kind))
+            this.later(this.stepMs * 0.8, () => {
+              if (this.inSight(event.to))
+                this.play("heavy-step", event.to, { rate: creatureVoice(kind) });
+            });
           break;
         }
         case "monster-noticed":
           this.rigs.get(event.id)?.noticed();
+          this.creatureSound(event.id, "creature-notice", event.kind, 30);
+          break;
+        case "monster-readied":
+          // The warning comes once the hero's own step has landed, like the red marker.
+          this.creatureSound(
+            event.id,
+            "creature-ready",
+            event.kind,
+            heroStepped ? this.stepMs * 0.7 : 60,
+          );
           break;
         case "monster-struck": {
           const delay = Math.max(strikeAt, heroStepped ? this.stepMs * 0.6 : 40);
@@ -444,6 +480,9 @@ export class DungeonView {
           this.later(delay, () => {
             const heroAt = this.expectedHero ?? event.from;
             rig?.strikeToward(heroAt, event.from);
+            const voice = creatureVoice(event.kind);
+            if (event.ranged) this.play("bolt", event.from, { rate: voice });
+            else this.play("swing", event.from, { rate: voice * 0.8, gain: 0.7 });
             if (event.ranged) {
               this.effects.bolt(
                 this.centerOf(event.from, 0.55),
@@ -467,6 +506,7 @@ export class DungeonView {
         case "rested":
           this.later(60, () => {
             const at = this.expectedHero ?? this.display;
+            this.play("rest");
             if (event.healed > 0)
               this.effects.number(this.centerOf(at, 0.9), `+${event.healed}`, HEAL_COLOR);
             this.sparks(at, HEAL_COLOR, 12, true);
@@ -474,20 +514,24 @@ export class DungeonView {
           });
           break;
         case "lantern":
+          this.play(event.bright ? "lantern-bright" : "lantern-dim");
           if (event.bright) this.sparks(this.expectedHero ?? this.display, 0xffe2a0, 10, true);
           break;
         case "died":
           this.later(strikeAt + 160, () => {
+            this.play("death");
             this.hero.collapse();
             if (!this.reducedMotion) this.shake = Math.max(this.shake, 4);
           });
           break;
         case "changed-floor":
           this.transition = { phase: "out", ms: 0 };
+          this.play("stairs");
           this.hero.startSink();
           break;
         case "monster-hurt":
           this.later(110, () => {
+            this.play("hit", event.at, { gain: 0.8 });
             this.rigs.get(event.id)?.flash();
             this.effects.number(
               this.centerOf(event.at, 0.4),
@@ -504,6 +548,7 @@ export class DungeonView {
           this.loot.pickUp(event.loot, delay);
           this.later(delay, () => {
             const name = itemKind(event.item).name;
+            this.play(event.fromCache ? "cache-open" : "pickup", event.at);
             if (event.fromCache) this.crateBurst(event.at);
             this.sparks(event.at, PICKUP_COLOR, event.fromCache ? 14 : 8, true);
             this.effects.label(
@@ -515,13 +560,14 @@ export class DungeonView {
           break;
         }
         case "pack-full":
-          this.later(heroStepped ? this.stepMs * 0.7 : 30, () =>
+          this.later(heroStepped ? this.stepMs * 0.7 : 30, () => {
+            this.play("denied");
             this.effects.label(
               this.centerOf(this.expectedHero ?? this.display, 1.05),
               "Pack full",
               MUTED_COLOR,
-            ),
-          );
+            );
+          });
           break;
         case "used":
           this.supplyUsed(event.item, event.amount);
@@ -531,6 +577,7 @@ export class DungeonView {
           break;
         case "equipped": {
           const at = this.expectedHero ?? this.display;
+          this.play(event.slot === "weapon" ? "equip-weapon" : "equip-armor");
           this.effects.ring(this.centerOf(at, 0.5), TILE_PIXELS * 0.9, PICKUP_COLOR, 320);
           this.sparks(at, PICKUP_COLOR, 8, true);
           this.hero.flash(0xfff0c8);
@@ -539,6 +586,7 @@ export class DungeonView {
         }
         case "trap-found":
           this.later(80, () => {
+            this.play("trap-found", event.at);
             const color = trapKind(event.kind).color;
             this.effects.ring(this.centerOf(event.at, 0.5), TILE_PIXELS * 0.9, color, 420);
             this.sparks(event.at, color, 6, true);
@@ -550,20 +598,23 @@ export class DungeonView {
           strikeAt = Math.max(strikeAt, delay + 160);
           break;
         }
-        case "waited":
+        case "dropped":
+          this.play("drop");
+          break;
         case "no-stairs":
-        case "monster-readied":
-        case "spotted":
         case "not-enough-charge":
         case "camp-spent":
         case "nothing-here":
         case "item-unneeded":
         case "already-equipped":
-        case "dropped":
         case "cannot-drop":
         case "cannot-afford":
         case "sold-out":
         case "no-merchant":
+          this.play("denied");
+          break;
+        case "waited":
+        case "spotted":
           break;
       }
     }
@@ -596,6 +647,7 @@ export class DungeonView {
     this.advanceTransition(deltaMs);
     const frame = this.steps.update(deltaMs);
     if (frame.landed && !frame.chained) this.hero.landed();
+    if (frame.landed) this.play("step");
     this.display = frame.position;
     this.lightRadius = approach(this.lightRadius, model.sightRadius, deltaMs, LIGHT_HALF_LIFE_MS);
     const seconds = this.elapsedMs / 1000;
@@ -1018,9 +1070,35 @@ export class DungeonView {
     return { x: (tile.x + 0.5) * TILE_PIXELS, y: (tile.y + 1 - lift) * TILE_PIXELS };
   }
 
+  /** Plays a sound from where it happens: placed left or right of the hero, softer far away. */
+  private play(
+    id: SoundId,
+    at?: Point | null,
+    options: { rate?: number; gain?: number } = {},
+  ): void {
+    const place = at ? placeSound(at, this.display) : { pan: 0, gain: 1 };
+    sound.play(id, { pan: place.pan, gain: place.gain * (options.gain ?? 1), rate: options.rate });
+  }
+
+  /** Whether a tile is in sight; a creature heard out of sight would give it away. */
+  private inSight(tile: Point): boolean {
+    const index = indexOf(tile);
+    return this.sightTarget[index] === 1 || (this.sight[index] ?? 0) > 0.5;
+  }
+
+  /** A creature's own sound, in its voice, only if the hero can see it. */
+  private creatureSound(id: string, cue: SoundId, kind: CreatureId, delayMs: number): void {
+    this.later(delayMs, () => {
+      const at = this.rigs.get(id)?.expected;
+      if (at && this.inSight(at)) this.play(cue, at, { rate: creatureVoice(kind) });
+    });
+  }
+
   private heroHurt(damage: number, absorbed: number): void {
     const at = this.centerOf(this.expectedHero ?? this.display, 0.75);
     const lost = damage - absorbed;
+    if (lost > 0) this.play("hero-hurt");
+    if (absorbed > 0) this.play("armor", null, { gain: lost > 0 ? 0.6 : 1 });
     if (absorbed > 0) this.effects.number({ x: at.x - 5, y: at.y }, `-${absorbed}`, SHIELD_COLOR);
     if (lost > 0)
       this.effects.number(
@@ -1036,6 +1114,7 @@ export class DungeonView {
   private levelUpBurst(level: number): void {
     const at = this.expectedHero ?? this.display;
     const center = this.centerOf(at, 0.5);
+    this.play("level-up");
     this.effects.ring(center, TILE_PIXELS * 1.6, LEVEL_COLOR, 520);
     this.effects.number(this.centerOf(at, 1.1), `Level ${level}!`, LEVEL_COLOR, true);
     this.sparks(at, LEVEL_COLOR, 22, true);
@@ -1043,6 +1122,7 @@ export class DungeonView {
   }
 
   private pulseWave(at: Point): void {
+    this.play("pulse");
     this.effects.ring(this.centerOf(at, 0.5), (PULSE_RADIUS + 0.6) * TILE_PIXELS, 0xffc070, 380);
     this.effects.ring(this.centerOf(at, 0.5), (PULSE_RADIUS + 0.2) * TILE_PIXELS, 0xff8a3d, 300);
     this.sparks(at, 0xffd9a0, 24, true);
@@ -1052,6 +1132,8 @@ export class DungeonView {
   private supplyUsed(item: SupplyId, amount: number): void {
     const at = this.expectedHero ?? this.display;
     const effect = (itemKind(item) as SupplyKind).effect;
+    // Each supply's sound is named after its effect: heal, vigor, charge, shield, flare …
+    this.play(effect.kind);
     switch (effect.kind) {
       case "heal":
         this.effects.number(this.centerOf(at, 0.9), `+${amount}`, HEAL_COLOR);
@@ -1117,6 +1199,7 @@ export class DungeonView {
   private trapSprung(event: Extract<GameEvent, { type: "trap-sprung" }>): void {
     const color = trapKind(event.kind).color;
     const center = this.centerOf(event.at, 0.5);
+    this.play(`trap-${event.kind}`, event.at);
     switch (event.kind) {
       case "ember-vent":
         this.flareBurst(event.at);
@@ -1140,6 +1223,7 @@ export class DungeonView {
 
   /** The Beacon blazes back to life: the end of the descent. */
   private rekindle(at: Point): void {
+    this.play("rekindle");
     this.beaconLit = true;
     this.beacon.texture = this.lootTextures.feature("beacon-lit");
     const center = this.centerOf(at, 0.5);

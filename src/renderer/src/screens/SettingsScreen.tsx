@@ -12,6 +12,8 @@ import {
   type UiScale,
   unbindKey,
 } from "../../../shared/settings";
+import { sound } from "../audio/player";
+import { SOUND_IDS, SOUNDS, type SoundId } from "../audio/sounds";
 import { toggleFullscreen } from "../fullscreen";
 import { savesAreLocalToBrowser } from "../saves/saveService";
 import { useSettings } from "../settings/SettingsContext";
@@ -33,6 +35,7 @@ const ACTION_NAMES: Readonly<Record<KeyAction, string>> = {
   pack: "Open the pack",
   map: "Map size",
   help: "How to play",
+  mute: "Sound on / off",
 };
 
 const SCALE_NAMES: Readonly<Record<UiScale, string>> = {
@@ -107,6 +110,71 @@ export function SettingsScreen({ onClose }: { onClose(): void }) {
         )}
       </section>
 
+      <section className="flex flex-col gap-3" aria-labelledby="sound-heading">
+        <h3 id="sound-heading" className="text-sm tracking-[0.2em] text-bone/60 uppercase">
+          Sound
+        </h3>
+        <SettingRow label="Sound">
+          {choice(false, settings.muted, "On", () => set({ muted: false }))}
+          {choice(true, settings.muted, "Off", () => set({ muted: true }))}
+        </SettingRow>
+        <VolumeRow
+          label="Master volume"
+          value={settings.masterVolume}
+          sample="pickup"
+          onChange={(masterVolume) => set({ masterVolume })}
+        />
+        <VolumeRow
+          label="Effects"
+          value={settings.effectsVolume}
+          sample="hit"
+          onChange={(effectsVolume) => set({ effectsVolume })}
+        />
+        <VolumeRow
+          label="Menus and buttons"
+          value={settings.interfaceVolume}
+          sample="ui-open"
+          onChange={(interfaceVolume) => set({ interfaceVolume })}
+        />
+        <VolumeRow
+          label="Background air"
+          value={settings.ambienceVolume}
+          sample="drip"
+          onChange={(ambienceVolume) => set({ ambienceVolume })}
+        />
+        <SettingRow label="When another window is in front">
+          {choice(true, settings.muteInBackground, "Go quiet", () =>
+            set({ muteInBackground: true }),
+          )}
+          {choice(false, settings.muteInBackground, "Keep playing", () =>
+            set({ muteInBackground: false }),
+          )}
+        </SettingRow>
+        <details className="text-sm">
+          <summary className="cursor-pointer text-bone/70 hover:text-ember">
+            Listen to each sound
+          </summary>
+          <div className="mt-2 grid grid-cols-1 gap-1 sm:grid-cols-2">
+            {SOUND_IDS.filter((id) => id !== "ambience").map((id) => (
+              <button
+                key={id}
+                type="button"
+                data-sound="none"
+                className="flex items-baseline gap-2 rounded px-2 py-1 text-left hover:bg-ember/10"
+                onClick={() => sound.play(id)}
+              >
+                <span className="text-ember">▸</span>
+                <span className="text-bone/85">{SOUNDS[id].description}</span>
+                <span className="ml-auto font-mono text-[11px] text-bone/40">
+                  {id}
+                  {sound.replaced.has(id) ? " (file)" : ""}
+                </span>
+              </button>
+            ))}
+          </div>
+        </details>
+      </section>
+
       <section className="flex flex-col gap-2" aria-labelledby="controls-heading">
         <div className="flex items-center justify-between">
           <h3 id="controls-heading" className="text-sm tracking-[0.2em] text-bone/60 uppercase">
@@ -173,6 +241,37 @@ export function SettingsScreen({ onClose }: { onClose(): void }) {
       </section>
       {error && <p className="text-sm text-[#ff9c8a]">Could not save settings: {error}</p>}
     </Dialog>
+  );
+}
+
+/** A volume slider; letting go plays a sample so the new level can be heard. */
+function VolumeRow({
+  label,
+  value,
+  sample,
+  onChange,
+}: {
+  label: string;
+  value: number;
+  sample: SoundId;
+  onChange(value: number): void;
+}) {
+  return (
+    <SettingRow label={label}>
+      <input
+        type="range"
+        min={0}
+        max={100}
+        step={5}
+        value={value}
+        aria-label={label}
+        className="w-44 cursor-pointer accent-ember"
+        onChange={(event) => onChange(Number(event.target.value))}
+        onPointerUp={() => sound.play(sample)}
+        onKeyUp={() => sound.play(sample)}
+      />
+      <span className="w-10 text-right font-mono text-xs text-bone/60">{value}%</span>
+    </SettingRow>
   );
 }
 
