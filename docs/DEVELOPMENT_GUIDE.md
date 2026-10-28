@@ -1,8 +1,9 @@
 # Embercrawl development guide
 
 How every mechanism in Embercrawl works, where it lives in the code, and how to change it safely.
-Written for version 0.12.0 (milestone 9 so far: difficulty, the Spike Trap and the Void Hauberk). `docs/PLAN.md` says *what* we're building and why; this
-guide says *how it works now*. Update both when a mechanic changes.
+Written for version 0.12.0 (milestone 9 so far: difficulty, the Spike Trap and the Void
+Hauberk), and checked against the code on 2026-10-28. `docs/PLAN.md` says *what* we're building
+and why; this guide says *how it works now*. Update both when a mechanic changes.
 
 ## Contents
 
@@ -96,8 +97,16 @@ Where the important code lives:
 | Message log wording | `src/renderer/src/game/messages.ts` |
 | Tooltip and item wording | `src/renderer/src/game/itemText.ts` |
 | The balance bot | `src/bot/bot.ts` (run with `scripts/balance.mts`) |
-| Keys | `src/renderer/src/input/useGameKeys.ts` |
+| Difficulty | `DIFFICULTY_HEALTH` in `src/engine/rules.ts`; the picker in `screens/DifficultyPicker.tsx` |
+| Achievements | `src/engine/achievements.ts` |
+| Keys | `src/renderer/src/input/useGameKeys.ts` (bindings in `src/shared/settings.ts`) |
 | Walking speed and key repeat | `src/renderer/src/game/timing.ts` |
+| Settings | `src/shared/settings.ts`, `src/main/settings-store.ts`, `screens/SettingsScreen.tsx` |
+| Character files, backups, export/import | `src/main/save-store.ts` (desktop), `src/renderer/src/saves/saveService.ts` (browser) |
+| The bridge between the game window and the PC | `src/shared/bridge.ts`, `src/preload/index.ts`, `src/main/index.ts` |
+| Drawing and animation | `src/renderer/src/render/dungeon/DungeonView.ts` |
+| Sound | `src/renderer/src/audio/` (`sounds.ts`, `synth.ts`, `player.ts`) |
+| Art | `src/renderer/src/assets/sprites/`, imported with `scripts/import-art.mts` |
 
 ---
 
@@ -522,7 +531,9 @@ traps per floor = 0 on floor 1, otherwise min(5, 1 + floor(floor number ÷ 7))  
   death screen appears after a short pause so the fall animation plays.
 - **The character survives.** Each character keeps a record across descents: descents started,
   deepest floor, deaths, wins and the bestiary (every creature kind ever seen). "Begin a new descent"
-  starts a fresh run from floor 1 with a new seed and the starting gear.
+  starts a fresh run from floor 1 with a new seed and the starting gear, on the difficulty picked
+  on that screen (the character's current one unless changed; see
+  [section 7](#7-creatures)).
 - Multiple characters, each in its own save file, are listed on the title screen. The first one
   ("Wanderer") is created automatically.
 
@@ -533,8 +544,8 @@ Files: `src/engine/achievements.ts` (the list), `src/engine/save.ts` (`updateCha
 
 - Each descent keeps **tallies** in `run.stats`: gold spent, rests, traps found and sprung,
   supplies used, turns with the lantern bright, and guardians defeated.
-- When a descent ends (death or victory), the record gains a **history entry**: date, result,
-  seed, floor, level, turns, kills, gold and what killed the hero. The newest 50 are kept
+- When a descent ends (death or victory), the record gains a **history entry**: date,
+  difficulty, result, seed, floor, level, turns, kills, gold and what killed the hero. The newest 50 are kept
   (`HISTORY_LIMIT`).
 - **Achievements** are checked after every turn. Each one is a test of the run and the bestiary;
   once earned it stays earned, with the date. A notice appears at the top of the screen and in the
@@ -666,7 +677,7 @@ Changing a number (healing, damage, weights) does **not** need a format change.
 Each engine event triggers an effect: steps glide; attacks lunge, flash and pop damage numbers;
 creature strikes are delayed until after your step lands; ranged shots fly; deaths dissolve;
 pickups lift away with the item's name; the flare and pulse send out shockwave rings; the survey
-lens reveals the floor as a ripple; traps burst with fire, alarm rings or gloom. Floor changes fade
+lens reveals the floor as a ripple; traps burst with fire, alarm rings, spikes or gloom. Floor changes fade
 through black with a "Floor N · Region" banner. Everything respects the system's *reduce motion*
 setting.
 
@@ -676,7 +687,7 @@ The floor as explored so far, in the top right corner, drawn in the floor's own 
 where the lantern reaches now), with markers: the hero (white), stairs down (orange) and up
 (blue), the camp, the merchant (green), the Beacon (pale gold), items and gold seen, found traps
 (violet) and creatures in view (red). Three sizes: small (5 pixels a tile), large (9) and hidden;
-**M** cycles them, the buttons on the map do the same, and the choice is remembered on the PC.
+**M** cycles them, the buttons on the map do the same, and the choice is saved in Settings.
 Clicking the map walks there. It hides while the pack or the merchant's panel is open.
 
 ### Art
@@ -718,8 +729,8 @@ and `beacon-lit.png` there too; gold piles are `items/gold.png`. A used camp sho
 dimmed and greyed. With only `beacon.png`, the lit Beacon shows it as it is and the unlit Beacon
 a dimmed copy (`loadDimmedTexture` in `textures.ts`); add `beacon-lit.png` to draw them apart.
 
-Every creature has art. Still drawn as placeholders: ring mail, the three traps and the
-merchant.
+Every creature has art, and so do all items but ring mail. Still drawn as placeholders: ring
+mail, three of the four traps (ember vent, alarm glyph, gloom rune) and the merchant's stall.
 
 ### Sound
 
@@ -727,7 +738,7 @@ Files: `src/renderer/src/audio/sounds.ts` (the list of sounds and the pure helpe
 `synth.ts` (how each sound is made), `player.ts` (playing them), and the `play(...)` calls in
 `DungeonView.handleEvents` (which sound goes with which event).
 
-- **Every sound is made in code**, so the game ships no recordings. Each sound is a *recipe* in
+- **Every sound (48 of them) is made in code**, so the game ships no recordings. Each sound is a *recipe* in
   `synth.ts`: tones and filtered noise with a volume shape, rendered once into a buffer when the
   game starts (about half a second in the background). Recipes are seeded, so a sound is the
   same on every launch. Footsteps, hits, coins and a few others have 2–4 takes picked at random,
@@ -802,6 +813,7 @@ Keep sounds that play often (steps, swings, clicks) quiet and short.
 | `trap-ember-vent` | Effects | An ember vent erupts |
 | `trap-alarm-glyph` | Effects | An alarm glyph rings |
 | `trap-gloom-rune` | Effects | A gloom rune drains the light |
+| `trap-spike-trap` | Effects | A spike trap springs |
 | `sealed` | Effects | Stairs or Beacon held shut by a guardian |
 | `rekindle` | Effects | The Beacon is rekindled |
 | `ui-click` | Menus and buttons | Pressing a button |
@@ -841,8 +853,11 @@ table shows the defaults.
 The pause menu (Esc) also has Settings, Records, **Copy a bug report** (copies the version, seed,
 floor, hero, gear and recent messages for pasting into a message) and the game's version.
 
-Key handling: `input/useGameKeys.ts` (dungeon, reading the bindings from Settings), `screens/game/InventoryPanel.tsx` (pack) and
-`screens/game/ShopPanel.tsx` (merchant).
+The hints under the message log, the action button and the how-to-play card show the player's
+own bindings (`screens/game/KeyHints.tsx`).
+
+Key handling: `input/useGameKeys.ts` (dungeon, reading the bindings from Settings),
+`screens/game/InventoryPanel.tsx` (pack) and `screens/game/ShopPanel.tsx` (merchant).
 
 ---
 
@@ -866,9 +881,11 @@ Things to keep in mind:
 
 1. Add an entry to `CREATURES` in `creatures.ts` (id, name, description, stats, first floor,
    behavior, placeholder color). Keep the list ordered by first floor.
-2. Optionally add `assets/sprites/creatures/<id>.png`.
+2. Add its art with the import script (or a placeholder is drawn from its color). Its sounds
+   use its behavior for their pitch automatically (`creatureVoice`).
 3. Note: adding a creature changes which creatures appear on floors (the spawn pool), but not the
    floor layouts.
+4. Run `pnpm balance` before and after.
 
 ### Add a supply
 
@@ -882,14 +899,30 @@ Things to keep in mind:
 ### Add a weapon or armor
 
 Add an entry to `WEAPONS` or `ARMORS` in `items.ts` (power, `tier` = first floor), keeping each
-list in order of strength (a test checks this). It enters the gear pool automatically.
+list in order of strength (a test checks this). It enters the gear pool, merchants' stock and
+guardians' hoards automatically. Add its art, then measure with `pnpm balance`: even one new
+armor shifts which gear floors get (the Void Hauberk moved Normal by a few points).
 
 ### Add a trap
 
 Add it to `TRAPS` in `items.ts`, give it a strength in `trapPower` and a weight in `trapWeight`
 (`rules.ts`), handle its effect in `springTrap` (`run.ts`), describe it in `trapEffect`
 (`itemText.ts`) and `describeTrap` (`messages.ts`), and give it a visual in `trapSprung`
-(`DungeonView.ts`) and a placeholder in `drawTrap` (`render/itemArt.ts`).
+(`DungeonView.ts`) and a placeholder in `drawTrap` (`render/itemArt.ts`). Its sound is `trap-<id>`: add it to
+`SOUNDS` (`audio/sounds.ts`) and give it a recipe in `audio/synth.ts` (TypeScript insists). Add
+its art, add a test (see the spike trap tests in `tests/engine/difficulty.test.ts`), and measure
+with `pnpm balance`: the first Spike Trap cut Normal's wins by six points.
+
+### Add an achievement
+
+Add an entry to `ACHIEVEMENTS` in `achievements.ts` and a test. Ids are stored in saves: never
+rename or reuse one.
+
+### Add a sound
+
+Add an id to `SOUNDS` (`audio/sounds.ts`, with its slider group and description), a recipe in
+`audio/synth.ts`, and a `this.play(...)` call where it should be heard (`DungeonView.ts` for the
+dungeon, `sound.play(...)` elsewhere). Or replace an existing one with a file (section 13).
 
 ### Add a palette
 
@@ -898,7 +931,10 @@ existing seeds (purely visual).
 
 ### Make the game easier or harder overall
 
-Measure first: run `pnpm balance` (see [section 16](#16-testing-and-tools)) before and after.
+Players can already choose Easy or Hard (section 7); this is about the game as a whole. Measure
+first: run `pnpm balance` (see [section 16](#16-testing-and-tools)) before and after, on Normal
+and then on Easy and Hard, since all three shift together. To change how far apart the
+difficulties are, change `DIFFICULTY_HEALTH` (health only: attack is far too coarse).
 Good levers, roughly from gentlest to strongest: `CREATURE_HP_PER_FLOOR` (the finest dial);
 healing amounts and recovery supplies; camp healing; gold and prices (the bot relies on buying
 gear upgrades: steeper prices cut its wins from 26% to 8%); creature count; starting health and
@@ -912,7 +948,9 @@ level gains; gear power; `CREATURE_ATTACK_BASE` (coarse: see section 7).
 |---|---|
 | `pnpm check` | Type checks, lint and all tests |
 | `pnpm smoke` | Builds and launches the real app six times (title, settings, records, game, game with the pack open, game with the merchant's panel open), silently; fails on any error, or if the game screens made no sounds; screenshots in `.smoke/` |
-| `pnpm balance 200 1` | The balance bot plays 200 whole descents (seeds 1–200) and reports the win rate, where runs end and what kills them |
+| `pnpm balance 300 1 [easy\|normal\|hard]` | The balance bot plays 300 whole descents (seeds 1–300) on a difficulty (Normal if left out) and reports the win rate, where runs end and what kills them |
+| `node scripts/smoke.mjs <path\to\Embercrawl.exe>` | The smoke test against a packaged build (an unpacked folder or the portable exe) |
+| `pnpm exec tsx scripts/import-art.mts <folder> --sheet check.png` | Imports the owner's art (section 13) |
 | `pnpm dev:web` | Runs the game in a browser at http://localhost:5173 (saves in the browser) |
 | `pnpm dev` | Runs the desktop app with hot reload |
 | `pnpm dist` | Builds into `release/<version>/`, for x64 and ARM64 each: `Embercrawl-<version>-<arch>.zip` (unzip and run `Embercrawl.exe`, no install), `Embercrawl-<version>-portable-<arch>.exe` (one file, no install, unpacks itself on each launch so it starts a little slower) and `Embercrawl-Setup-<version>-<arch>.exe` (installer). All keep saves in `%APPDATA%\Embercrawl`. `scripts/dist.mjs` forces the BCJ 7-Zip filter: the portable exe and installer unpack with an older 7-Zip that cannot read the ARM64 filter newer 7-Zip uses, so without it the ARM64 portable exe quits before the game starts. |
@@ -931,20 +969,20 @@ Test files (`tests/`):
 | `engine/items.test.ts` | Catalog, pack, floor contents, supplies, gear, dropping, traps |
 | `engine/descent.test.ts` | Gold, merchants, guardians sealing the stairs, the Beacon, victory, the version-3 upgrade |
 | `engine/bot.test.ts` | The balance bot finishes whole descents without getting stuck |
-| `engine/save.test.ts` | Save format, upgrades from real version-1 and version-2 saves |
+| `engine/save.test.ts` | Save format, upgrades from real version-1 and version-2 saves (versions 3, 4 and 5 are tested in `descent`, `records` and `difficulty`) |
 | `engine/records.test.ts` | Achievements, tallies, run history, the version-4 upgrade |
+| `engine/difficulty.test.ts` | Difficulty (health only, kept down the stairs, in the history, Hard Won), the version-5 upgrade, spike traps |
 | `engine/fuzz.test.ts` | Thousands of random actions, checking the rules never break |
 | `main/save-store.test.ts` | Writing save files safely, rename, delete, backups and restore, export and import |
 | `main/settings.test.ts` | Reading and writing settings, key bindings, sound settings |
 | `renderer/palettes.test.ts`, `motion.test.ts` | Palettes and animation helpers |
-| `engine/difficulty.test.ts` | Difficulty (health only, kept down the stairs, in the history, Hard Won), the version-5 upgrade, spike traps |
 | `scripts/import-art.test.ts` | The art import script matches file names to the right ids |
 | `renderer/sounds.test.ts` | Sound file names, volume curve, placement, creature voices, the background air by depth |
 
 ### The balance bot (`src/bot/bot.ts`, `scripts/balance.mts`)
 
-The plan's target is that **a fixed, simple bot wins 25–35% of runs**, measured on seeds kept
-apart from tuning. The bot sees only what a player would (explored tiles, creatures in view) and
+The plan's target is that **a fixed, simple bot wins 25–35% of runs on Normal** (55–65% on Easy,
+10–15% on Hard), measured on seeds kept apart from tuning. The bot sees only what a player would (explored tiles, creatures in view) and
 plays through the normal rules. Each turn, in order, it:
 
 1. heals when at 45% health or less, drinks vigor draughts, and refills a lantern at 50 or less;
@@ -962,8 +1000,8 @@ It never dodges telegraphed strikes, so a careful player should do better than i
 creatures block the only way, it fights through them; if it paces over the same few tiles for 60
 turns, it stops exploring that floor and heads down.
 
-`pnpm balance [runs] [first seed] [easy|normal|hard]` plays descents on all but one CPU core (about 40 seconds for
-200 on the owner's PC). **Tuning seeds** are 1–300; **check seeds** start at 100001. Milestone 5's
+`pnpm balance [runs] [first seed] [easy|normal|hard]` plays descents on all but one CPU core
+(about 40 seconds for 300 on the owner's PC). **Tuning seeds** are 1–300; **check seeds** start at 100001. Milestone 5's
 result (version 0.5.0): **30.7%** wins on 300 tuning seeds and **33.0%** on 300 check seeds.
 Losses cluster at the two guardians (floors 6–10 and 16–20) and the finale (26–30), with few on
 floors 1–5. Winners reach level 22 in about 4,600 turns.
@@ -996,7 +1034,8 @@ the owner's art fits), and its rules as a starting point, then improves on them.
 | 7 | `bbb3898` | 0.10.0 | Sound: 47 effects made in code, placed left or right, creature voices, background air by depth, volume settings and mute, your own sound files by name; key hints follow your bindings |
 | — | `6847e69` | 0.10.1 | The title screen loses its tagline |
 | 8 | `4466576` | 0.11.0 | Art pass: the owner's icons for all 25 creatures and most items, gold, the cache, the camp and the Beacon; the art import script |
-| 9 (part) | (see git log) | 0.12.0 | Difficulty (Easy, Normal, Hard), the Spike Trap and Void Hauberk (with the owner's art), the Hard Won achievement |
+| — | `ac234c8` | 0.11.0 | The ARM64 portable exe and installer start again (`scripts/dist.mjs` forces the BCJ 7-Zip filter) |
+| 9 (part) | `18c379e` | 0.12.0 | Difficulty (Easy, Normal, Hard), the Spike Trap and Void Hauberk (with the owner's art), the Hard Won achievement |
 
 Key decisions along the way (details in `docs/PLAN.md`):
 
@@ -1010,6 +1049,14 @@ Key decisions along the way (details in `docs/PLAN.md`):
 - **Bright light reveals traps** (milestone 4), tying exploring to the lantern.
 - **Guardians seal the stairs** (milestone 5), so floors 10 and 20 are real checkpoints.
 - **Balance by measurement** (milestone 5): numbers are tuned with the bot, not by feel.
+- **Saves that never break** (milestone 6 on): every format change ships an upgrade step, tested
+  against a genuine save from the previous version.
+- **Sound made in code** (milestone 7): no recordings to license, and the owner's own files can
+  replace any sound by name.
+- **Art by file name** (milestones 4 and 8): the owner's pictures replace drawn placeholders,
+  imported by a script that removes their backgrounds.
+- **Difficulty changes only creature health** (milestone 9): attack moves in whole points against
+  armor, far too coarse to tune with.
 
 ---
 
@@ -1017,8 +1064,10 @@ Key decisions along the way (details in `docs/PLAN.md`):
 
 From the plan's later milestones:
 
-- **Milestone 9:** testing and refinement: longer play-testing, bug fixes, balance and new
-  feature ideas. Music is still undecided.
+- **Milestone 9 (in progress):** testing and refinement. Done so far: difficulty, the Spike Trap,
+  the Void Hauberk. Ideas waiting on the owner's play-testing: special rooms for floor variety, a
+  death recap of the last few turns, hero classes or starting kits, unlocks that carry over between
+  descents, a daily run. Music is still undecided.
 - **Milestone 10:** gamepad support, opening a `.embercrawl` file by double-clicking it, and the
   remaining art (ring mail, traps, merchant).
 - **Milestone 11:** the 1.0 release (signed builds, store page, updates).
