@@ -51,12 +51,13 @@ function createBrowserSaves(): SaveBridge {
       return listings.sort((a, b) => updated(b).localeCompare(updated(a)));
     },
     load: async (id) => read(id),
-    create: async (name) => {
+    create: async (name, difficulty) => {
       const save = newCharacter({
         id: crypto.randomUUID(),
         name,
         now: new Date().toISOString(),
         seed: crypto.getRandomValues(new Uint32Array(1))[0] ?? 0,
+        difficulty,
       });
       await write(save);
       return save;

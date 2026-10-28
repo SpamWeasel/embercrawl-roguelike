@@ -1,10 +1,12 @@
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
+import type { Difficulty } from "../../../../engine/rules";
 import type { RunState } from "../../../../engine/run";
 import type { KeyAction } from "../../../../shared/settings";
 import { toggleFullscreen } from "../../fullscreen";
 import { causeName } from "../../game/itemText";
 import { INTRO_LINES, INTRO_TITLE } from "../../game/lore";
 import { useSettings } from "../../settings/SettingsContext";
+import { DifficultyPicker } from "../DifficultyPicker";
 import { keyHint, keyList } from "./KeyHints";
 
 /** Calls `onKey` for the given key codes while mounted. */
@@ -68,16 +70,20 @@ export function IntroCard({ onBegin }: { onBegin(): void }) {
 export function DeathScreen({
   run,
   deepestFloor,
+  difficulty: current,
   onNewDescent,
   onTitle,
 }: {
   run: RunState;
   deepestFloor: number;
-  onNewDescent(): void;
+  difficulty: Difficulty;
+  onNewDescent(difficulty: Difficulty): void;
   onTitle(): void;
 }) {
   const focusRef = useFocusOnMount<HTMLButtonElement>();
-  useKeys(NEW_DESCENT_KEYS, onNewDescent);
+  const [difficulty, setDifficulty] = useState(current);
+  const begin = () => onNewDescent(difficulty);
+  useKeys(NEW_DESCENT_KEYS, begin);
   const slayer = run.killedBy ? causeName(run.killedBy) : null;
   const stats: Array<[string, number]> = [
     ["Floor", run.depth],
@@ -108,8 +114,9 @@ export function DeathScreen({
             </div>
           ))}
         </dl>
+        <DifficultyPicker value={difficulty} onChange={setDifficulty} center />
         <div className="flex gap-3">
-          <button type="button" className="btn btn-primary" onClick={onNewDescent} ref={focusRef}>
+          <button type="button" className="btn btn-primary" onClick={begin} ref={focusRef}>
             Begin a new descent <kbd className="kbd">Enter</kbd>
           </button>
           <button type="button" className="btn" onClick={onTitle}>
@@ -184,16 +191,20 @@ export function PauseMenu({
 export function VictoryScreen({
   run,
   wins,
+  difficulty: current,
   onNewDescent,
   onTitle,
 }: {
   run: RunState;
   wins: number;
-  onNewDescent(): void;
+  difficulty: Difficulty;
+  onNewDescent(difficulty: Difficulty): void;
   onTitle(): void;
 }) {
   const focusRef = useFocusOnMount<HTMLButtonElement>();
-  useKeys(NEW_DESCENT_KEYS, onNewDescent);
+  const [difficulty, setDifficulty] = useState(current);
+  const begin = () => onNewDescent(difficulty);
+  useKeys(NEW_DESCENT_KEYS, begin);
   const stats: Array<[string, number]> = [
     ["Level", run.hero.level],
     ["Creatures slain", run.kills],
@@ -224,8 +235,9 @@ export function VictoryScreen({
             </div>
           ))}
         </dl>
+        <DifficultyPicker value={difficulty} onChange={setDifficulty} center />
         <div className="flex gap-3">
-          <button type="button" className="btn btn-primary" onClick={onNewDescent} ref={focusRef}>
+          <button type="button" className="btn btn-primary" onClick={begin} ref={focusRef}>
             Begin a new descent <kbd className="kbd">Enter</kbd>
           </button>
           <button type="button" className="btn" onClick={onTitle}>
@@ -300,6 +312,10 @@ export function HelpCard({ onClose }: { onClose(): void }) {
           </li>
           <li>Guardians on floors 10 and 20 keep the stairs down sealed until they fall.</li>
           <li>Falling ends the descent, not the character: your records and bestiary remain.</li>
+          <li>
+            Difficulty (Easy, Normal or Hard) only changes how much health creatures have. Pick it
+            for a new character, or again for each new descent.
+          </li>
         </ul>
         <dl className="grid grid-cols-[auto_1fr] gap-x-6 gap-y-1 text-[13px]">
           {keys.map(([action, key]) => (

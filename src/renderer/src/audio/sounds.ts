@@ -58,6 +58,7 @@ export const SOUNDS = {
   "trap-ember-vent": { group: "effects", description: "An ember vent erupts" },
   "trap-alarm-glyph": { group: "effects", description: "An alarm glyph rings" },
   "trap-gloom-rune": { group: "effects", description: "A gloom rune drains the light" },
+  "trap-spike-trap": { group: "effects", description: "A spike trap springs" },
   sealed: { group: "effects", description: "Stairs or Beacon held shut by a guardian" },
   rekindle: { group: "effects", description: "The Beacon is rekindled" },
   "ui-click": { group: "interface", description: "Pressing a button" },

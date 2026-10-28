@@ -72,6 +72,7 @@ describe("character saves", () => {
       depth: 1,
       level: 1,
       status: "active",
+      difficulty: "normal",
       deepestFloor: 1,
       wins: 0,
       playTimeMs: 0,

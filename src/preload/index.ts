@@ -8,7 +8,7 @@ const bridge: EmbercrawlBridge = {
   saves: {
     list: () => ipcRenderer.invoke(IPC.listCharacters),
     load: (id) => ipcRenderer.invoke(IPC.loadCharacter, id),
-    create: (name) => ipcRenderer.invoke(IPC.createCharacter, name),
+    create: (name, difficulty) => ipcRenderer.invoke(IPC.createCharacter, name, difficulty),
     write: (save) => ipcRenderer.invoke(IPC.writeCharacter, save),
     rename: (id, name) => ipcRenderer.invoke(IPC.renameCharacter, id, name),
     remove: (id) => ipcRenderer.invoke(IPC.deleteCharacter, id),

@@ -134,6 +134,7 @@ describe("run history", () => {
     expect(fallen.record.history).toEqual([
       {
         endedAt: LATER,
+        difficulty: "normal",
         result: "dead",
         seed: 77,
         depth: 1,
@@ -180,7 +181,7 @@ describe("version-4 saves", () => {
     const save = parseCharacterSave(v4);
     expect(save.version).toBe(SAVE_VERSION);
     const { stats, ...rest } = save.run as RunState;
-    expect(rest).toEqual(v4.run);
+    expect(rest).toEqual({ ...v4.run, difficulty: "normal" });
     expect(stats).toEqual(emptyStats());
     expect(save.record).toEqual({ ...v4.record, history: [], achievements: [] });
   });

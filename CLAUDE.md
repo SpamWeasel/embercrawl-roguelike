@@ -30,7 +30,7 @@ The owner is new to development tooling. Explain setup steps and trade-offs plai
 - Every animation must respect `prefers-reduced-motion` (no bob, shake, particles; shorter steps).
 - **Saves must never break:** every save-format change bumps the format version, adds an upgrade
   step and adds a test that loads the previous format. Capture a genuine fixture from the old
-  engine *before* changing it (see `tests/fixtures/character-v1.json` to `character-v4.json`);
+  engine *before* changing it (see `tests/fixtures/character-v1.json` to `character-v5.json`);
   fixtures are never reformatted (Biome ignores `tests/fixtures`).
 - **Balance changes are measured:** run `pnpm balance` on tuning seeds before and after, and
   confirm on the check seeds (from 100001); record the result in `docs/DEVELOPMENT_GUIDE.md`.
@@ -73,7 +73,7 @@ The owner is new to development tooling. Explain setup steps and trade-offs plai
 | `pnpm smoke` | Builds, then launches (silently) the title screen, Settings, Records, the game, and the game with the pack or the merchant panel open, with throwaway saves; screenshots and reports in `.smoke/`; fails on console errors |
 | `node scripts/smoke.mjs <path\to\Embercrawl.exe>` | Same check against a packaged build |
 | `pnpm exec tsx scripts/import-art.mts <folder> --sheet <file.png>` | Imports the owner's art by file name: removes the background, trims, scales to 128×128; skips existing art unless `--replace`; `--dry-run` shows the matches |
-| `pnpm balance [runs] [first seed]` | The balance bot plays whole descents and reports the win rate (target 25–35%); tuning seeds 1–300, check seeds from 100001 |
+| `pnpm balance [runs] [first seed] [easy\|normal\|hard]` | The balance bot plays whole descents and reports the win rate (targets: Easy 55–65%, Normal 25–35%, Hard 10–15%); tuning seeds 1–300, check seeds from 100001 |
 | `pnpm exec tsx scripts/demo-saves.mts <folder> [--showcase] <floor>...` | Demo characters already on chosen floors, one user-data folder per floor; `--showcase` gathers creatures around the hero, lays out items, a cache and a found trap, and stocks the pack; `--merchant` stands the hero at a merchant with gold; `--won` makes a won floor 30 |
 | `pnpm dist` | Builds into `release/<version>/`, for x64 and ARM64 each: a zip to unpack and run (no install), a single portable exe, and an installer (`scripts/dist.mjs` forces the BCJ 7-Zip filter; without it the ARM64 portable exe and installer cannot unpack themselves) |
 | `node scripts/make-icon.mjs [source.png]` | Rebuilds `build/icon.png` and `build/icon.ico` |

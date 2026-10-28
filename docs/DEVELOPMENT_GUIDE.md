@@ -1,7 +1,7 @@
 # Embercrawl development guide
 
 How every mechanism in Embercrawl works, where it lives in the code, and how to change it safely.
-Written for version 0.11.0 (milestone 8, art). `docs/PLAN.md` says *what* we're building and why; this
+Written for version 0.12.0 (milestone 9 so far: difficulty, the Spike Trap and the Void Hauberk). `docs/PLAN.md` says *what* we're building and why; this
 guide says *how it works now*. Update both when a mechanic changes.
 
 ## Contents
@@ -262,7 +262,8 @@ A floor draws from creatures whose first floor is within the last **10 floors**
 
 ```text
 steps   = floor − creature's first floor
-health  = round(base health × (1 + 0.105 × steps) × variance)  variance 0.90–1.15 (guardians 1.0)
+health  = round(base health × (1 + 0.105 × steps) × variance × difficulty)
+          variance 0.90–1.15 (guardians 1.0); difficulty 0.9 Easy, 1 Normal, 1.065 Hard
 attack  = round((base attack + floor(steps ÷ 3)) × (1.02 + 0 × floor))
 ```
 
@@ -271,6 +272,22 @@ The three numbers are the balance bot's main dials (see [section 16](#16-testing
 (0, an unused dial that makes attack grow with depth). Attack is a coarse dial: because attacks
 are rounded, a change of 0.01 can push many creatures up a whole point at once (1.02 gave the bot
 51% wins, 1.03 only 17%). Health is the finer dial.
+
+### Difficulty (`DIFFICULTY_HEALTH` in `rules.ts`)
+
+Each character has a difficulty, picked when it's created and again (optionally) for each new
+descent on the death or victory screen. It changes **only creatures' health**: Easy 90%, Normal
+100%, Hard 106.5%. Floors, items, traps and creature attack are the same on every difficulty
+(the same seed gives the same dungeon). Attack was tried first, but it is counted in whole points
+against armor: Hard at +5% attack and +10% health gave the bot 0 wins in 300. The descent's
+difficulty is stored in the run (new floors are made with it) and in each history entry, and
+shown as a tag by the character's name in the game and in the title screen's list.
+
+| Difficulty | Creature health | Bot wins (tuning / check seeds) | Target |
+|---|---:|---:|---:|
+| Easy | 90% | 60.7% / 64.7% | 55–65% |
+| Normal | 100% | 28.0% / 32.0% | 25–35% |
+| Hard | 106.5% | 11.7% / 16.7% | 10–15% |
 
 ### Behaviors
 
@@ -402,9 +419,9 @@ before opening.
 | Rime Sabre | +11 | 10 | | Obsidian Plate | 7 | 10 |
 | Gearbreaker Maul | +13 | 13 | | Orrery Brigandine | 9 | 14 |
 | Prism Glaive | +15 | 16 | | Starwoven Mail | 11 | 18 |
-| Starsteel Halberd | +17 | 19 | | Void Carapace | 13 | 22 |
-| Null Edge | +19 | 22 | | Beacon Aegis | 15 | 26 |
-| Beacon Blade | +22 | 26 | | | | |
+| Starsteel Halberd | +17 | 19 | | Void Hauberk | 12 | 20 |
+| Null Edge | +19 | 22 | | Void Carapace | 13 | 22 |
+| Beacon Blade | +22 | 26 | | Beacon Aegis | 15 | 26 |
 
 **Which gear a floor gets** (`pickGear`, `gearWeight`):
 
@@ -468,6 +485,7 @@ Catalog: `TRAPS` in `items.ts`. Counts and strength: `rules.ts`. Effects: `sprin
 |---|---:|---:|---|---|
 | Ember Vent | 2 | 3 | 3–5 + floor(floor ÷ 2) damage | Burns. **Armor doesn't reduce it**; a shield absorbs it. Can kill. |
 | Alarm Glyph | 3 | 1.5 | 8 tiles | Wakes every creature within 8 tiles (through walls) and tells them where you are. |
+| Spike Trap | 4 | 1.5 | 3–5 + floor(0.6 × floor) | Stabs like a creature's blow: **armor takes its defense off it**, then a shield absorbs the rest. Can kill. |
 | Gloom Rune | 5 | 1.5 | 25 + floor number charge | Drains the lantern and switches off bright light. |
 
 ```text
@@ -520,7 +538,7 @@ Files: `src/engine/achievements.ts` (the list), `src/engine/save.ts` (`updateCha
   (`HISTORY_LIMIT`).
 - **Achievements** are checked after every turn. Each one is a test of the run and the bestiary;
   once earned it stays earned, with the date. A notice appears at the top of the screen and in the
-  message log. There are 18:
+  message log. There are 19:
 
 | Achievement | Earned by |
 |---|---|
@@ -529,6 +547,7 @@ Files: `src/engine/achievements.ts` (the list), `src/engine/save.ts` (`updateCha
 | Into the Deep / Far Below / The Bottom | Reach floor 10 / 20 / 30 |
 | Bell Unrung / Clockwork Stilled | Defeat the Chain Sexton (floor 10) / the Orrery Knight (floor 20) |
 | Keeper of the Beacon | Rekindle the Beacon |
+| Hard Won | Rekindle the Beacon on Hard |
 | No Rest for the Bold | Rekindle the Beacon without resting at a camp |
 | By Dim Light | Reach floor 10 without turning the lantern bright |
 | Seasoned / Veteran | Reach level 10 / 20 |
@@ -561,7 +580,7 @@ File: `src/engine/save.ts` (format), `src/main/save-store.ts` (writing files).
 - A save stores the run's state, including every visited floor, but **not** catalog data: an
   item is stored by id, so changing a salve's healing changes it in existing saves too.
 
-**Format versions** (`SAVE_VERSION`, now 5):
+**Format versions** (`SAVE_VERSION`, now 6):
 
 | Version | Milestone | Added | Upgrade from the previous version |
 |---|---|---|---|
@@ -570,6 +589,7 @@ File: `src/engine/save.ts` (format), `src/main/save-store.ts` (writing files).
 | 3 | 4 | Items, pack, gear, traps | Starting gear and empty pack; visited floors get the items and traps they were generated with |
 | 4 | 5 | Gold, merchants, sealed stairs, the Beacon, victory, wins | Empty purse, no wins yet; visited floors get their gold piles (never on a tile already holding something), merchant, stock and Beacon |
 | 5 | 6 | Per-descent tallies, run history, achievements | Fresh tallies, empty history, no achievements yet |
+| 6 | 9 | Difficulty (character, descent, history entries) | Normal everywhere |
 
 ### Managing characters (desktop app)
 
@@ -917,6 +937,7 @@ Test files (`tests/`):
 | `main/save-store.test.ts` | Writing save files safely, rename, delete, backups and restore, export and import |
 | `main/settings.test.ts` | Reading and writing settings, key bindings, sound settings |
 | `renderer/palettes.test.ts`, `motion.test.ts` | Palettes and animation helpers |
+| `engine/difficulty.test.ts` | Difficulty (health only, kept down the stairs, in the history, Hard Won), the version-5 upgrade, spike traps |
 | `scripts/import-art.test.ts` | The art import script matches file names to the right ids |
 | `renderer/sounds.test.ts` | Sound file names, volume curve, placement, creature voices, the background air by depth |
 
@@ -941,11 +962,17 @@ It never dodges telegraphed strikes, so a careful player should do better than i
 creatures block the only way, it fights through them; if it paces over the same few tiles for 60
 turns, it stops exploring that floor and heads down.
 
-`pnpm balance [runs] [first seed]` plays descents on all but one CPU core (about 40 seconds for
+`pnpm balance [runs] [first seed] [easy|normal|hard]` plays descents on all but one CPU core (about 40 seconds for
 200 on the owner's PC). **Tuning seeds** are 1–300; **check seeds** start at 100001. Milestone 5's
 result (version 0.5.0): **30.7%** wins on 300 tuning seeds and **33.0%** on 300 check seeds.
 Losses cluster at the two guardians (floors 6–10 and 16–20) and the finale (26–30), with few on
 floors 1–5. Winners reach level 22 in about 4,600 turns.
+
+Milestone 9 (version 0.12.0) added the Spike Trap and the Void Hauberk, which first dropped Normal
+to **19.7%**; with the spike trap switched off it was 26.0%, so the trap was made softer (3–5 +
+0.6 × floor instead of 5–7 + floor) and as common as the alarm glyph and gloom rune. Normal then
+measured **28.0%** (tuning) and **32.0%** (check). Easy and Hard are in the difficulty table in
+section 7.
 
 ---
 
@@ -969,6 +996,7 @@ the owner's art fits), and its rules as a starting point, then improves on them.
 | 7 | `bbb3898` | 0.10.0 | Sound: 47 effects made in code, placed left or right, creature voices, background air by depth, volume settings and mute, your own sound files by name; key hints follow your bindings |
 | — | `6847e69` | 0.10.1 | The title screen loses its tagline |
 | 8 | `4466576` | 0.11.0 | Art pass: the owner's icons for all 25 creatures and most items, gold, the cache, the camp and the Beacon; the art import script |
+| 9 (part) | (see git log) | 0.12.0 | Difficulty (Easy, Normal, Hard), the Spike Trap and Void Hauberk (with the owner's art), the Hard Won achievement |
 
 Key decisions along the way (details in `docs/PLAN.md`):
 

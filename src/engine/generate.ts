@@ -21,6 +21,7 @@ import { Rng } from "./rng";
 import {
   CREATURE_LIFESPAN,
   creatureCount,
+  type Difficulty,
   GEAR_FIRST_FLOOR,
   GEAR_SLOT_BIAS,
   gearPrice,
@@ -101,7 +102,11 @@ interface Area {
  * Builds floor `depth` of the run with this seed. Each floor uses its own random stream, so it comes
  * out the same no matter when, or in what order, floors are first visited.
  */
-export function generateFloor(seed: number, depth: number): Floor {
+export function generateFloor(
+  seed: number,
+  depth: number,
+  difficulty: Difficulty = "normal",
+): Floor {
   if (!Number.isInteger(depth) || depth < 1 || depth > FLOOR_COUNT) {
     throw new RangeError(`Floor depth must be 1-${FLOOR_COUNT}, got ${depth}.`);
   }
@@ -132,7 +137,7 @@ export function generateFloor(seed: number, depth: number): Floor {
   const reserved: Point[] = [entrance, ...(downStairs ? [downStairs] : [])];
   const camp = pickCamp(rng, distances, roomTiles, reserved);
   if (camp) reserved.push(camp);
-  const monsters = spawnCreatures(rng, depth, tiles, distances, reserved);
+  const monsters = spawnCreatures(rng, depth, difficulty, tiles, distances, reserved);
   const items = placeItems(rng, depth, tiles, entrance, [...reserved, ...monsters]);
   const traps = placeTraps(rng, depth, tiles, distances, [...reserved, ...monsters, ...items]);
   const used = () => [...reserved, ...monsters, ...items, ...traps];
@@ -381,6 +386,7 @@ function pickCamp(
 function spawnCreatures(
   rng: Rng,
   depth: number,
+  difficulty: Difficulty,
   tiles: readonly TileKind[],
   distances: readonly number[],
   reserved: readonly Point[],
@@ -401,7 +407,7 @@ function spawnCreatures(
   const weight = (c: CreatureKind) => (c.firstFloor > depth - NEW_CREATURE_WINDOW - 1 ? 3 : 1);
   const monsters: Monster[] = [];
   const place = (kind: CreatureKind, at: Point) => {
-    const { hp, attack } = scaledStats(kind, depth, rng.float());
+    const { hp, attack } = scaledStats(kind, depth, rng.float(), difficulty);
     monsters.push({
       id: `${depth}-${monsters.length + 1}`,
       kind: kind.id as Monster["kind"],

@@ -1214,6 +1214,10 @@ export class DungeonView {
         this.effects.label(this.centerOf(event.at, 1.1), "!!", color);
         if (!this.reducedMotion) this.shake = Math.max(this.shake, 1.4);
         break;
+      case "spike-trap":
+        this.sparks(event.at, 0xe8ecf4, 12);
+        this.heroHurt(event.damage, event.absorbed);
+        break;
       case "gloom-rune":
         this.effects.ring(center, TILE_PIXELS * 1.4, color, 460);
         this.sparks(event.at, 0x5a3aa0, 18, true);

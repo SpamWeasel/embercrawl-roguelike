@@ -155,6 +155,7 @@ export function arena(rows: readonly string[], options: ArenaOptions): RunState 
   };
   return {
     seed,
+    difficulty: "normal",
     turn,
     depth: 1,
     floors: [floor],

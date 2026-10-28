@@ -145,6 +145,14 @@ art matches; descriptions are new.
 - Fix: the key hints, the action button and the how-to-play card now show the player's own key
   bindings.
 
+**Built so far in milestone 9** (testing and refinement; the owner asked for these first):
+- **Difficulty:** Easy, Normal or Hard per character, chosen when it's created and again for each
+  new descent. Only creature health changes (90%, 100%, 106.5%), tuned with the bot to about
+  60%, 30% and 13% wins. Saves move to format 6. A new achievement, Hard Won.
+- **Spike Trap** (from floor 4): stabs like a blow, so armor helps, unlike the Ember Vent.
+- **Void Hauberk** (defense 12, from floor 20), between Starwoven Mail and the Void Carapace.
+- Both use the owner's existing icons, which matched nothing before.
+
 **Built in milestone 8** (art pass, at the owner's request before the testing phase):
 - **43 more of the owner's icons** in the game: 22 creatures (every creature now has art), 17
   weapons, armors and supplies, gold, the supply cache, the camp and the Beacon. Art already in

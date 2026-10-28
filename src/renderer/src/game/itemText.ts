@@ -188,6 +188,8 @@ export function trapEffect(trap: Pick<Trap, "kind" | "power">): string {
       return `Wakes every creature within ${trap.power} tiles.`;
     case "gloom-rune":
       return `Drains up to ${trap.power} lantern charge.`;
+    case "spike-trap":
+      return `Stabs for ${trap.power}, less your armor.`;
   }
 }
 

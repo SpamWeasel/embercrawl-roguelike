@@ -4,6 +4,7 @@ import { creatureKind } from "../../../engine/creatures";
 import { type Point, samePoint } from "../../../engine/geometry";
 import { GOLD } from "../../../engine/items";
 import { FLOOR_COUNT } from "../../../engine/map";
+import type { Difficulty } from "../../../engine/rules";
 import {
   type Action,
   availableInteraction,
@@ -24,6 +25,7 @@ import { DungeonCanvas } from "../render/dungeon/DungeonCanvas";
 import { paletteForFloor } from "../render/dungeon/palettes";
 import { useSettings, wantsReducedMotion } from "../settings/SettingsContext";
 import { Dialog } from "./Dialog";
+import { DIFFICULTY_NAMES } from "./DifficultyPicker";
 import { InventoryPanel } from "./game/InventoryPanel";
 import { ItemIcon, TileTooltip } from "./game/ItemDetails";
 import { KeyHints, keyHint, SpeakerIcon } from "./game/KeyHints";
@@ -316,8 +318,8 @@ export function GameScreen({ initial, saves, startWith, onExit, onReady }: GameS
     onExit();
   };
 
-  const startOver = () => {
-    beginNewDescent();
+  const startOver = (difficulty?: Difficulty) => {
+    beginNewDescent(difficulty);
     setDeathShown(false);
     setVictoryShown(false);
     setShopOpen(false);
@@ -329,7 +331,7 @@ export function GameScreen({ initial, saves, startWith, onExit, onReady }: GameS
     return (
       <main className="grid h-dvh place-items-center gap-4 text-bone/70">
         <p>{character.name} is between descents.</p>
-        <button type="button" className="btn btn-primary" onClick={startOver}>
+        <button type="button" className="btn btn-primary" onClick={() => startOver()}>
           Begin a new descent
         </button>
       </main>
@@ -368,7 +370,14 @@ export function GameScreen({ initial, saves, startWith, onExit, onReady }: GameS
 
       <header className="hud-bar hud-top gap-6">
         <div className="flex shrink-0 flex-col leading-tight">
-          <span className="font-display text-lg text-bone">{character.name}</span>
+          <span className="font-display text-lg text-bone">
+            {character.name}
+            {run.difficulty !== "normal" && (
+              <span className="ml-2 rounded border border-ember/40 px-1.5 py-px align-middle font-sans text-[10px] tracking-wider text-ember/90 uppercase">
+                {DIFFICULTY_NAMES[run.difficulty]}
+              </span>
+            )}
+          </span>
           <span className="text-xs text-ember">
             Floor {run.depth} <span className="text-bone/50">of {FLOOR_COUNT}</span>
             <span className="text-bone/55"> · {model.palette.name}</span>
@@ -450,6 +459,7 @@ export function GameScreen({ initial, saves, startWith, onExit, onReady }: GameS
         <DeathScreen
           run={run}
           deepestFloor={character.record.deepestFloor}
+          difficulty={character.difficulty}
           onNewDescent={startOver}
           onTitle={() => void exitToTitle()}
         />
@@ -459,6 +469,7 @@ export function GameScreen({ initial, saves, startWith, onExit, onReady }: GameS
         <VictoryScreen
           run={run}
           wins={character.record.wins}
+          difficulty={character.difficulty}
           onNewDescent={startOver}
           onTitle={() => void exitToTitle()}
         />

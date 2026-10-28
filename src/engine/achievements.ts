@@ -64,6 +64,12 @@ export const ACHIEVEMENTS = [
     earned: (run) => run.status === "won",
   },
   {
+    id: "hard-won",
+    name: "Hard Won",
+    description: "Rekindle the Beacon on Hard.",
+    earned: (run) => run.status === "won" && run.difficulty === "hard",
+  },
+  {
     id: "no-rest",
     name: "No Rest for the Bold",
     description: "Rekindle the Beacon without resting at a single camp.",

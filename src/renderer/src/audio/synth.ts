@@ -839,6 +839,23 @@ export const RECIPES: Readonly<Record<SoundId, Recipe>> = {
       });
     },
   },
+  "trap-spike-trap": {
+    length: 0.6,
+    level: 0.55,
+    draw(kit) {
+      // A click of the plate, then iron rasping up and ringing.
+      noise(kit, { decay: 0.02, gain: 0.7, filter: { type: "bandpass", freq: 900, q: 2 } });
+      noise(kit, {
+        at: 0.03,
+        attack: 0.01,
+        decay: 0.16,
+        gain: 0.8,
+        filter: { type: "bandpass", freq: 2500, to: 5500, q: 2 },
+      });
+      bell(kit, { freq: 1250, at: 0.05, decay: 0.35, gain: 0.35 });
+      tone(kit, { at: 0.04, freq: 140, to: 70, decay: 0.12, gain: 0.6 });
+    },
+  },
   sealed: {
     length: 1.1,
     level: 0.5,

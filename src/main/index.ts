@@ -12,6 +12,7 @@ import {
   Menu,
   shell,
 } from "electron";
+import { DIFFICULTIES, type Difficulty } from "../engine/rules";
 import { type CharacterSave, newCharacter, summarizeCharacter } from "../engine/save";
 import {
   type AppInfo,
@@ -182,14 +183,17 @@ function registerIpcHandlers(): void {
     event.sender.setZoomFactor(saved.uiScale);
     return saved;
   });
-  ipcMain.handle(IPC.createCharacter, async (event, name: unknown) => {
+  ipcMain.handle(IPC.createCharacter, async (event, name: unknown, difficulty: unknown) => {
     assertTrustedSender(event);
     if (typeof name !== "string") throw new TypeError("A character name must be text.");
+    if (!(DIFFICULTIES as readonly unknown[]).includes(difficulty))
+      throw new TypeError("Unknown difficulty.");
     const save = newCharacter({
       id: randomUUID(),
       name,
       now: new Date().toISOString(),
       seed: randomInt(0, 2 ** 32),
+      difficulty: difficulty as Difficulty,
     });
     await saves.write(save);
     return save;

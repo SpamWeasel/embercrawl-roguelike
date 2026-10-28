@@ -16,12 +16,12 @@ describe("art import", () => {
     expect(idForFile("emberdepths_stairs_down_icon.jpg")).toBe("stairs-down");
     expect(idForFile("emberdepths_playericon_2.jpg")).toBe("hero");
     expect(idForFile("ember-vent.png")).toBe("ember-vent");
+    expect(idForFile("emberdepths_spike_trap_icon.jpg")).toBe("spike-trap");
+    expect(idForFile("emberdepths_item_void_hauberk_icon.jpg")).toBe("void-hauberk");
   });
 
   it("leaves pictures that match nothing alone", () => {
     expect(idForFile("emberdepths_logo.jpg")).toBeNull();
     expect(idForFile("emberdepths_horizontal_banner.jpg")).toBeNull();
-    expect(idForFile("emberdepths_spike_trap_icon.jpg")).toBeNull();
-    expect(idForFile("emberdepths_item_void_hauberk_icon.jpg")).toBeNull();
   });
 });

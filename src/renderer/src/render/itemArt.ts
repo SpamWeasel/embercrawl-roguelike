@@ -667,6 +667,14 @@ function drawTrap(kind: TrapKind): string {
       p.rect(15, 10, 2, 8, light);
       p.rect(15, 20, 2, 2, light);
       break;
+    case "spike-trap":
+      p.rect(5, 18, 22, 6, 0x3a3a40);
+      p.rect(5, 18, 22, 1, scaleColor(color, 0.7));
+      for (const x of [8, 13, 18, 23]) {
+        p.line([x, 18], [x + 1, 8], color, 2);
+        p.px(x + 1, 8, light);
+      }
+      break;
     case "gloom-rune":
       p.ellipse(16, 16, 11, 11, color, true);
       p.ellipse(16, 16, 5, 5, 0x1a1430);

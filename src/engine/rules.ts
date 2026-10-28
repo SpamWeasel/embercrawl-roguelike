@@ -5,6 +5,21 @@
 import type { CreatureKind } from "./creatures";
 import { type ItemId, isSupply, itemKind, type SupplyId, type TrapKind } from "./items";
 
+/** Difficulty, chosen per character (and changeable for each new descent). */
+export const DIFFICULTIES = ["easy", "normal", "hard"] as const;
+export type Difficulty = (typeof DIFFICULTIES)[number];
+
+/**
+ * Creatures' health on each difficulty, as a share of Normal's (after depth scaling). Only
+ * health changes: attack is counted in whole points against armor, so even a 5% change in it
+ * swings the balance bot from winnable to hopeless. Measured with `pnpm balance` (see the guide).
+ */
+export const DIFFICULTY_HEALTH: Readonly<Record<Difficulty, number>> = {
+  easy: 0.9,
+  normal: 1,
+  hard: 1.065,
+};
+
 /** The hero. */
 export const HERO_START_HP = 30;
 export const LEVEL_HP_GAIN = 5;
@@ -97,11 +112,17 @@ export function scaledStats(
   kind: CreatureKind,
   depth: number,
   roll: number,
+  difficulty: Difficulty = "normal",
 ): { hp: number; attack: number } {
   const steps = Math.max(0, depth - kind.firstFloor);
   const variance = kind.guardian ? 1 : 0.9 + roll * 0.25;
   return {
-    hp: Math.max(1, Math.round(kind.hp * (1 + CREATURE_HP_PER_FLOOR * steps) * variance)),
+    hp: Math.max(
+      1,
+      Math.round(
+        kind.hp * (1 + CREATURE_HP_PER_FLOOR * steps) * variance * DIFFICULTY_HEALTH[difficulty],
+      ),
+    ),
     attack: Math.max(
       1,
       Math.round(
@@ -248,5 +269,8 @@ export function trapPower(kind: TrapKind, depth: number, roll: number): number {
       return 25 + depth;
     case "alarm-glyph":
       return 8;
+    case "spike-trap":
+      // Armor takes its defense off this, like a creature's blow.
+      return 3 + roll + Math.floor(depth * 0.6);
   }
 }

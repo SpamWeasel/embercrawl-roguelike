@@ -20,7 +20,7 @@ export function bugReport(
   ];
   if (run) {
     lines.push(
-      `Descent: seed ${run.seed}, floor ${run.depth}, turn ${run.turn}, ${run.status}`,
+      `Descent: seed ${run.seed}, ${run.difficulty}, floor ${run.depth}, turn ${run.turn}, ${run.status}`,
       `Hero: level ${run.hero.level}, health ${run.hero.hp}/${run.hero.maxHp}, shield ${run.hero.shield}, gold ${run.gold}`,
       `Gear: ${itemKind(run.equipment.weapon).name}, ${itemKind(run.equipment.armor).name}`,
       `Pack: ${

@@ -291,6 +291,16 @@ export const ARMORS = [
     color: 0xc8d8ff,
   },
   {
+    id: "void-hauberk",
+    name: "Void Hauberk",
+    description:
+      "A scale coat recovered from the deep vaults, its bronze darkened by whatever lives below.",
+    category: "armor",
+    power: 12,
+    tier: 20,
+    color: 0x7a5a3a,
+  },
+  {
     id: "void-carapace",
     name: "Void Carapace",
     description: "The shed shell of something that lived far below. Blows seem to sink into it.",
@@ -417,6 +427,14 @@ export const TRAPS = [
     description: "A rune that drinks light. Step on it and it drains your lantern dry, or nearly.",
     firstFloor: 5,
     color: 0x7a6aff,
+  },
+  {
+    id: "spike-trap",
+    name: "Spike Trap",
+    description:
+      "A pressure plate that drives iron spikes up through the floor. Armor turns part of them aside; a shield takes the rest first.",
+    firstFloor: 4,
+    color: 0xb0b4bc,
   },
 ] as const satisfies readonly TrapKindInfo[];
 

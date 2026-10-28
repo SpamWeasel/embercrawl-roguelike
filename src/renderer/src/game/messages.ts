@@ -283,5 +283,9 @@ function describeTrap(event: Extract<GameEvent, { type: "trap-sprung" }>): strin
         : `${trap} shrieks into the dark!`;
     case "gloom-rune":
       return `${trap} drinks ${event.drained} charge from your lantern.`;
+    case "spike-trap": {
+      const shield = event.absorbed > 0 ? ` (your shield takes ${event.absorbed})` : "";
+      return `${trap} springs, stabbing you for ${event.damage}${shield}!`;
+    }
   }
 }

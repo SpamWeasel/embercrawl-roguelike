@@ -3,6 +3,7 @@ import { CREATURE_IDS } from "../../../engine/creatures";
 import type { CharacterSummary } from "../../../engine/save";
 import { formatPlayTime, formatWhen } from "../format";
 import { causeName } from "../game/itemText";
+import { DIFFICULTY_NAMES } from "./DifficultyPicker";
 
 /** A character's record: totals, achievements and the history of finished descents. */
 export function Records({ summary }: { summary: CharacterSummary }) {
@@ -64,6 +65,7 @@ export function Records({ summary }: { summary: CharacterSummary }) {
               <tr>
                 <th className="py-1 font-normal">Ended</th>
                 <th className="font-normal">Result</th>
+                <th className="font-normal">Difficulty</th>
                 <th className="font-normal">Floor</th>
                 <th className="font-normal">Level</th>
                 <th className="font-normal">Slain</th>
@@ -81,6 +83,7 @@ export function Records({ summary }: { summary: CharacterSummary }) {
                         ? `Slain by ${causeName(entry.killedBy)}`
                         : "Fell"}
                   </td>
+                  <td className="text-bone/70">{DIFFICULTY_NAMES[entry.difficulty]}</td>
                   <td className="font-mono text-bone">{entry.depth}</td>
                   <td className="font-mono text-bone">{entry.level}</td>
                   <td className="font-mono text-bone">{entry.kills}</td>

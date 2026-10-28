@@ -2,6 +2,7 @@
  * The contract between the game window and the desktop shell. The game window can only reach the
  * PC through these calls; it has no direct access to files or Node.js.
  */
+import type { Difficulty } from "../engine/rules";
 import type { CharacterSave, CharacterSummary } from "../engine/save";
 import type { Settings } from "./settings";
 
@@ -93,8 +94,8 @@ export interface SaveFeatures {
 export interface SaveBridge {
   list(): Promise<CharacterListing[]>;
   load(id: string): Promise<CharacterSave>;
-  /** Creates, saves and returns a new character with a fresh descent. */
-  create(name: string): Promise<CharacterSave>;
+  /** Creates, saves and returns a new character with a fresh descent on this difficulty. */
+  create(name: string, difficulty: Difficulty): Promise<CharacterSave>;
   /** Resolves once this save, or a newer one for the same character, is safely on disk. */
   write(save: CharacterSave): Promise<void>;
   rename(id: string, name: string): Promise<void>;

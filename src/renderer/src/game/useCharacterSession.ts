@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { Point } from "../../../engine/geometry";
+import type { Difficulty } from "../../../engine/rules";
 import {
   type Action,
   type ActionResult,
@@ -28,7 +29,8 @@ export interface CharacterSession {
    */
   subscribe(listener: ActionListener): () => void;
   /** Starts a fresh descent for this character (after death). */
-  beginNewDescent(): void;
+  /** Starts a fresh descent, on another difficulty if given (it becomes the character's). */
+  beginNewDescent(difficulty?: Difficulty): void;
   readonly saveError: string | null;
 }
 
@@ -136,11 +138,14 @@ export function useCharacterSession(initial: CharacterSave, saves: SaveBridge): 
 
   const flush = useCallback(() => lastWrite.current, []);
 
-  const beginNewDescent = useCallback(() => {
-    cancelWalk();
-    const seed = crypto.getRandomValues(new Uint32Array(1))[0] ?? 0;
-    commit(beginDescent(current.current, seed, new Date().toISOString()));
-  }, [cancelWalk, commit]);
+  const beginNewDescent = useCallback(
+    (difficulty?: Difficulty) => {
+      cancelWalk();
+      const seed = crypto.getRandomValues(new Uint32Array(1))[0] ?? 0;
+      commit(beginDescent(current.current, seed, new Date().toISOString(), difficulty));
+    },
+    [cancelWalk, commit],
+  );
 
   return { character, act, walkTo, cancelWalk, flush, subscribe, beginNewDescent, saveError };
 }

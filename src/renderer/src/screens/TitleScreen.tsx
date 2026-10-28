@@ -1,5 +1,6 @@
 import { type FormEvent, useCallback, useEffect, useRef, useState } from "react";
 import { FLOOR_COUNT } from "../../../engine/map";
+import type { Difficulty } from "../../../engine/rules";
 import {
   CHARACTER_NAME_MAX,
   type CharacterSave,
@@ -13,6 +14,7 @@ import { readableError, savesAreLocalToBrowser } from "../saves/saveService";
 import { useSettings, wantsReducedMotion } from "../settings/SettingsContext";
 import { useBuildLabel } from "../useBuildLabel";
 import { Dialog } from "./Dialog";
+import { DIFFICULTY_NAMES, DifficultyPicker } from "./DifficultyPicker";
 import { HelpCard } from "./game/Overlays";
 import { SettingsScreen } from "./SettingsScreen";
 import { CharacterDialog } from "./title/CharacterDialog";
@@ -41,7 +43,7 @@ interface TitleScreenProps {
 async function loadListings(saves: SaveBridge): Promise<CharacterListing[]> {
   const listings = await saves.list();
   if (listings.length > 0) return listings;
-  await saves.create(FIRST_CHARACTER_NAME);
+  await saves.create(FIRST_CHARACTER_NAME, "normal");
   return saves.list();
 }
 
@@ -61,6 +63,7 @@ export function TitleScreen({ saves, autoContinue, startWith, onPlay, onReady }:
   const [notice, setNotice] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [name, setName] = useState("");
+  const [difficulty, setDifficulty] = useState<Difficulty>("normal");
   const [helpOpen, setHelpOpen] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(startWith === "settings");
   const [managing, setManaging] = useState<Managing | null>(null);
@@ -143,7 +146,7 @@ export function TitleScreen({ saves, autoContinue, startWith, onPlay, onReady }:
     }
     setBusy(true);
     try {
-      onPlay(await saves.create(cleanName));
+      onPlay(await saves.create(cleanName, difficulty));
     } catch (failure) {
       setError(readableError(failure));
       setBusy(false);
@@ -229,6 +232,8 @@ export function TitleScreen({ saves, autoContinue, startWith, onPlay, onReady }:
                     <span className="font-display text-lg text-bone">{listing.summary.name}</span>
                     <span className="text-xs text-bone/60">
                       {describeProgress(listing.summary)}
+                      {listing.summary.difficulty !== "normal" &&
+                        ` · ${DIFFICULTY_NAMES[listing.summary.difficulty]}`}
                       {" · "}deepest {listing.summary.deepestFloor}
                       {listing.summary.wins > 0 && ` · ${listing.summary.wins} won`}
                       {" · "}
@@ -286,6 +291,9 @@ export function TitleScreen({ saves, autoContinue, startWith, onPlay, onReady }:
               Begin descent
             </button>
           </form>
+          <div className="mt-2">
+            <DifficultyPicker value={difficulty} onChange={setDifficulty} disabled={busy} />
+          </div>
           {notice && (
             <p role="status" className="mt-3 text-sm text-[#9ff0b0]">
               {notice}

@@ -44,6 +44,7 @@ import {
   CREATURE_HIT_SPREAD,
   creatureHit,
   DIM_SIGHT,
+  type Difficulty,
   GUARDIAN_GEAR_LEAD,
   guardianHoard,
   HERO_HIT_SPREAD,
@@ -116,6 +117,8 @@ export function emptyStats(): RunStats {
 /** One descent: everything needed to resume exactly where the player left off. */
 export interface RunState {
   readonly seed: number;
+  /** How tough this descent's creatures are (chosen when it began). */
+  readonly difficulty: Difficulty;
   readonly turn: number;
   readonly depth: number;
   /** Floors visited so far, one per depth. Unvisited floors are generated on first arrival. */
@@ -324,8 +327,8 @@ export type Interaction =
   | { readonly kind: "rekindle"; readonly smotheredBy: CreatureId | null }
   | { readonly kind: "pick-up"; readonly item: LootId };
 
-export function newRun(seed: number): RunState {
-  const floor = generateFloor(seed, 1);
+export function newRun(seed: number, difficulty: Difficulty = "normal"): RunState {
+  const floor = generateFloor(seed, 1, difficulty);
   const hero: Hero = {
     ...floor.entrance,
     facing: "right",
@@ -339,6 +342,7 @@ export function newRun(seed: number): RunState {
   const seen = look(floor, hero, lantern, [], []);
   return {
     seed,
+    difficulty,
     turn: 0,
     depth: 1,
     floors: [seen.floor],
@@ -895,6 +899,14 @@ class Turn {
         hero.shield -= absorbed;
         hero.hp = Math.max(0, hero.hp - (damage - absorbed));
         break;
+      case "spike-trap": {
+        // Spikes strike like a blow: armor turns part of them aside, then a shield takes the rest.
+        damage = creatureHit(trap.power, heroDefense(gearPower(this.equipment.armor)), 0);
+        absorbed = Math.min(hero.shield, damage);
+        hero.shield -= absorbed;
+        hero.hp = Math.max(0, hero.hp - (damage - absorbed));
+        break;
+      }
       case "gloom-rune":
         drained = Math.min(this.lantern.charge, trap.power);
         this.lantern.charge -= drained;
@@ -1228,7 +1240,7 @@ function takeStairs(run: RunState): ActionResult {
 
   const toDepth = interaction.toDepth;
   const existing = run.floors.find((f) => f.depth === toDepth);
-  const target = existing ?? generateFloor(run.seed, toDepth);
+  const target = existing ?? generateFloor(run.seed, toDepth, run.difficulty);
   // Going down lands on the next floor's up stairs; going up lands on the previous floor's down stairs.
   const arrival = interaction.kind === "descend" ? target.entrance : target.downStairs;
   if (!arrival) throw new Error(`Floor ${toDepth} has no stairs to arrive on.`);

@@ -19,7 +19,14 @@ import {
 import { FLOOR_COUNT, isWalkable, MAP_HEIGHT, MAP_SIZE, MAP_WIDTH, tileAt } from "./map";
 import { emptyPack } from "./pack";
 import { Rng } from "./rng";
-import { HERO_START_HP, LANTERN_MAX, PACK_SLOTS, STACK_LIMIT } from "./rules";
+import {
+  DIFFICULTIES,
+  type Difficulty,
+  HERO_START_HP,
+  LANTERN_MAX,
+  PACK_SLOTS,
+  STACK_LIMIT,
+} from "./rules";
 import { type Cause, emptyStats, newRun, type RunState } from "./run";
 
 /**
@@ -34,9 +41,10 @@ import { type Cause, emptyStats, newRun, type RunState } from "./run";
  * 3. Items, the pack, weapons and armor, and traps (milestone 4).
  * 4. Gold, merchants, guardians that seal the stairs, the Beacon and victory (milestone 5).
  * 5. Run history, achievements and per-descent tallies (milestone 6).
+ * 6. Difficulty, for the character, each descent and each history entry (milestone 9).
  */
 export const SAVE_FORMAT = "embercrawl-character";
-export const SAVE_VERSION = 5;
+export const SAVE_VERSION = 6;
 /** Finished descents kept in a character's history, newest first. */
 export const HISTORY_LIMIT = 50;
 export const CHARACTER_NAME_MAX = 24;
@@ -59,6 +67,7 @@ export interface CharacterRecord {
 /** How one descent ended. */
 export interface HistoryEntry {
   readonly endedAt: string;
+  readonly difficulty: Difficulty;
   readonly result: "won" | "dead";
   readonly seed: number;
   readonly depth: number;
@@ -82,6 +91,8 @@ export interface CharacterSave {
   readonly createdAt: string;
   readonly updatedAt: string;
   readonly playTimeMs: number;
+  /** The difficulty new descents start on (the player can change it for each new descent). */
+  readonly difficulty: Difficulty;
   /** The current descent (possibly just ended in death), or null between descents. */
   readonly run: RunState | null;
   readonly record: CharacterRecord;
@@ -98,6 +109,7 @@ export interface CharacterSummary {
    * rekindled. "none": between descents.
    */
   readonly status: "active" | "dead" | "won" | "none";
+  readonly difficulty: Difficulty;
   readonly wins: number;
   readonly deepestFloor: number;
   readonly playTimeMs: number;
@@ -133,10 +145,17 @@ export interface NewCharacterOptions {
   /** ISO timestamp; passed in because the engine never reads the clock. */
   readonly now: string;
   readonly seed: number;
+  readonly difficulty?: Difficulty;
 }
 
-export function newCharacter({ id, name, now, seed }: NewCharacterOptions): CharacterSave {
-  const run = newRun(seed);
+export function newCharacter({
+  id,
+  name,
+  now,
+  seed,
+  difficulty = "normal",
+}: NewCharacterOptions): CharacterSave {
+  const run = newRun(seed, difficulty);
   return {
     format: SAVE_FORMAT,
     version: SAVE_VERSION,
@@ -145,6 +164,7 @@ export function newCharacter({ id, name, now, seed }: NewCharacterOptions): Char
     createdAt: now,
     updatedAt: now,
     playTimeMs: 0,
+    difficulty,
     run,
     record: {
       descents: 1,
@@ -158,11 +178,20 @@ export function newCharacter({ id, name, now, seed }: NewCharacterOptions): Char
   };
 }
 
-/** Starts a fresh descent (after a death, or between descents). The character keeps its records. */
-export function beginDescent(save: CharacterSave, seed: number, now: string): CharacterSave {
-  const run = newRun(seed);
+/**
+ * Starts a fresh descent (after a death, or between descents) on the character's difficulty, or
+ * on a new one, which then becomes the character's. The character keeps its records.
+ */
+export function beginDescent(
+  save: CharacterSave,
+  seed: number,
+  now: string,
+  difficulty: Difficulty = save.difficulty,
+): CharacterSave {
+  const run = newRun(seed, difficulty);
   return {
     ...save,
+    difficulty,
     run,
     updatedAt: now,
     record: {
@@ -208,6 +237,7 @@ export function updateCharacter(
 function historyEntry(run: RunState, now: string): HistoryEntry {
   return {
     endedAt: now,
+    difficulty: run.difficulty,
     result: run.status === "won" ? "won" : "dead",
     seed: run.seed,
     depth: run.depth,
@@ -254,6 +284,7 @@ export function summarizeCharacter(save: CharacterSave): CharacterSummary {
     depth: save.run?.depth ?? null,
     level: save.run?.hero.level ?? null,
     status: save.run?.status ?? "none",
+    difficulty: save.difficulty,
     deepestFloor: save.record.deepestFloor,
     wins: save.record.wins,
     playTimeMs: save.playTimeMs,
@@ -334,6 +365,25 @@ const UPGRADES: Readonly<
       ...save,
       run: isRecord(save.run) ? { ...save.run, stats: emptyStats() } : null,
       record: { ...record, history: [], achievements: [] },
+    };
+  },
+  /**
+   * 5 → 6: adds difficulty. Everything before it was played on what is now Normal: the character,
+   * the current descent and every past descent in the history.
+   */
+  5: (save) => {
+    const record = isRecord(save.record) ? save.record : {};
+    const history = Array.isArray(record.history) ? record.history : [];
+    return {
+      ...save,
+      difficulty: "normal",
+      run: isRecord(save.run) ? { ...save.run, difficulty: "normal" } : null,
+      record: {
+        ...record,
+        history: history.map((entry) =>
+          isRecord(entry) ? { ...entry, difficulty: "normal" } : entry,
+        ),
+      },
     };
   },
 };
@@ -465,6 +515,8 @@ const ArmorIdSchema = z.enum(ARMOR_IDS as [ArmorId, ...ArmorId[]]);
 const TrapKindSchema = z.enum(TRAP_IDS as [TrapKind, ...TrapKind[]]);
 const CauseSchema = z.union([CreatureIdSchema, TrapKindSchema]);
 
+const DifficultySchema = z.enum(DIFFICULTIES);
+
 const TileSchema = z.union([z.literal(0), z.literal(1), z.literal(2), z.literal(3)]);
 
 const FloorItemSchema = PointSchema.extend({
@@ -538,6 +590,7 @@ const Uint32 = z
 const RunSchema = z
   .object({
     seed: z.number().int(),
+    difficulty: DifficultySchema,
     turn: Count,
     depth: z.number().int().min(1).max(FLOOR_COUNT),
     floors: z.array(FloorSchema).min(1).max(FLOOR_COUNT),
@@ -585,6 +638,7 @@ const CharacterSchema = z.object({
   createdAt: IsoTimestamp,
   updatedAt: IsoTimestamp,
   playTimeMs: Count,
+  difficulty: DifficultySchema,
   run: RunSchema.nullable(),
   record: z.object({
     descents: Count,
@@ -596,6 +650,7 @@ const CharacterSchema = z.object({
       .array(
         z.object({
           endedAt: IsoTimestamp,
+          difficulty: DifficultySchema,
           result: z.enum(["won", "dead"]),
           seed: z.number().int(),
           depth: z.number().int().min(1).max(FLOOR_COUNT),
